@@ -1,0 +1,26 @@
+# Portable ~/.bashrc  --  no secrets, no employer/host specifics.
+# Machine- or employer-specific settings belong in ~/.bashrc.local (never published).
+case $- in *i*) ;; *) return ;; esac
+
+export LANG=en_US.UTF-8
+export EDITOR=vim
+export HISTSIZE=10000 HISTFILESIZE=20000 HISTCONTROL=ignoreboth
+shopt -s histappend checkwinsize 2>/dev/null
+
+export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+[ -f "$HOME/.local/bin/env" ] && . "$HOME/.local/bin/env"
+
+export PYENV_ROOT="$HOME/.pyenv"
+[ -d "$PYENV_ROOT/bin" ] && export PATH="$PYENV_ROOT/bin:$PATH"
+command -v pyenv >/dev/null 2>&1 && eval "$(pyenv init -)"
+
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+
+PS1='\u@\h \W \$ '
+export WORK="$HOME/work"
+alias ll='ls -lah'
+alias so='source ~/.bashrc'
+
+[ -f "$HOME/.alias" ] && . "$HOME/.alias"
+[ -f "$HOME/.bashrc.local" ] && . "$HOME/.bashrc.local"

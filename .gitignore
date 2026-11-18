@@ -1,0 +1,16 @@
+# Never commit local/review material
+.DS_Store
+_review/
+.blocklist.local
+*.local
+*.bak
+# Plaintext host SSH config. ssh/config.d/*.conf.gpg is what gets published.
+ssh/config.d/*.conf
+.env
+.env.*
+# Private keys must never land here
+id_*
+!id_*.pub
+*.pem
+*.key
+*_history

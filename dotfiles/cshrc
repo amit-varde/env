@@ -1,0 +1,17 @@
+# Portable ~/.cshrc (tcsh)  --  GENERATED TEMPLATE; no cshrc was found on the source machine.
+# Employer/site-specific setup (module loads, license servers, EDA paths) goes in ~/.cshrc.local (never published).
+if ( ! $?prompt ) exit
+
+setenv LANG en_US.UTF-8
+setenv EDITOR vim
+set path = ( $HOME/bin $HOME/.local/bin $path )
+set history = 10000
+set savehist = 10000
+set filec
+set autolist
+set prompt = "%n@%m %c2 %# "
+setenv WORK $HOME/work
+alias ll 'ls -lah'
+alias so 'source ~/.cshrc'
+
+if ( -f $HOME/.cshrc.local ) source $HOME/.cshrc.local

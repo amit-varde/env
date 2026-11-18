@@ -1,0 +1,18 @@
+# Copy to ~/.gitconfig and fill in the three placeholders (or, better, use per-account includes; see README).
+[user]
+	name = YOUR NAME
+	email = YOUR_WORK_EMAIL
+	# signingkey = YOUR_GPG_KEY_ID   # uncomment if you sign commits
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+# [commit]
+#	gpgsign = true
+# [tag]
+#	gpgsign = true
+[init]
+	defaultBranch = main
+[pull]
+	rebase = true

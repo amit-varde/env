@@ -1,0 +1,20 @@
+StrictHostKeyChecking no
+UserKnownHostsFile /dev/null
+ForwardAgent yes
+ServerAliveInterval 60
+ServerAliveCountMax 3
+ControlMaster auto
+ControlPersist 10m
+ForwardX11 yes
+LocalForward 5901 localhost:5901
+StrictHostKeyChecking accept-new
+LogLevel ERROR
+
+Include ~/.ssh/config.d/*.conf
+
+Host 127.0.0.1 localhost *.local
+    StrictHostKeyChecking no
+    UserKnownHostsFile /dev/null
+
+Host *
+  IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"

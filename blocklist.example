@@ -1,0 +1,6 @@
+# One case-insensitive extended-regex term per line. Copy to .blocklist.local (gitignored) and edit.
+# Anything matching is flagged by scripts/scan.sh and scripts/export-*.sh.
+acme-corp
+internal-project-name
+your\.name@
+/Users/yourname
