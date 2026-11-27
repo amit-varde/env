@@ -23,7 +23,7 @@ only expansion is paused, and only until the last line of `env.sh`.
 | `show_help` `handle_help` `file_mode` `editor_open` | `common` | Help text for `bin/` and `tools/install.sh` (header comments), file modes, and opening a path in `$EDITOR_APP` |
 | `path_prepend VAR DIR` | `env.sh` | Put `DIR` at the front of a colon list such as `PATH`, once |
 | `EDITOR`, `LANG` | `init-editor` | Editor and locale defaults |
-| — | `init-paths`, `init-pyenv`, `init-nvm`, `init-iterm2` | `PATH`/`MANPATH`, pyenv, nvm, and iTerm2 integration if installed (`~/.iterm2_shell_integration.zsh` under zsh, `.bash` under bash) |
+| — | `init-paths`, `init-pyenv`, `init-nvm`, `init-iterm2` | `PATH`/`MANPATH`, pyenv, nvm and iTerm2 integration if installed. The two that ship one file per shell are loaded per shell: iTerm2's `~/.iterm2_shell_integration.zsh` under zsh and `.bash` under bash, and nvm's `bash_completion` under bash only (`nvm.sh` itself loads in both). For nvm completion under zsh, run `autoload -U +X bashcompinit && bashcompinit` in `~/.zshrc.local` before `env.sh` and source the file yourself |
 
 ## Install helpers (`tools/` + `alias`)
 
