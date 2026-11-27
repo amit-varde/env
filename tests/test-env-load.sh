@@ -20,6 +20,11 @@
 #   4. `so` (re-source) is idempotent: PATH and MANPATH must not grow;
 #   5. iTerm2 integration: each shell loads its own file, so a bash login never
 #      sources zsh code;
+#   5b. nvm: nvm.sh loads in both shells, but nvm's bash-only completion script
+#      is loaded under bash alone. This is checked against a stand-in nvm, so it
+#      holds on machines that have no nvm at all -- the real one is present on
+#      GitHub's Linux runner and absent from macOS, which is how the bug got
+#      through the first CI run;
 #   6. `set -u` (nounset) and a HOME whose path contains a space;
 #   7. zsh -n AND bash -n over every file a login sources. Neither parser is a
 #      superset of the other, so one alone is not enough: `echo ${x^^}` and
@@ -276,6 +281,29 @@ if [ "$(uname -s)" = Darwin ]; then
 else
     echo "  skip init-iterm2 is macOS-only"
 fi
+
+# --- 5b. nvm's completion is bash-only; nvm.sh is not -----------------------
+# A stand-in nvm, so this runs everywhere rather than only where nvm exists.
+# NVM_DIR is honoured from the environment by init-nvm.bash, which is exactly
+# how GitHub's Linux runner (which exports it) differs from macOS (which does
+# not) -- so set it explicitly and test both shells on every platform.
+NVMDIR="$T/nvm"; mkdir -p "$NVMDIR"
+printf 'export BU_NVM_SH=loaded\n' > "$NVMDIR/nvm.sh"
+# The real file ends in `complete`, a bash builtin zsh does not have.
+printf '#!/usr/bin/env bash\nexport BU_NVM_COMPLETION=loaded\n_bu_fake_nvm() { :; }\ncomplete -o default -F _bu_fake_nvm nvm\n' \
+    > "$NVMDIR/bash_completion"
+for sh in $SHELLS; do
+    { printf "export NVM_DIR='%s'\n" "$NVMDIR"
+      load_lines ""
+      echo '[ "${BU_NVM_SH:-}" = loaded ] || echo "MISSING nvm.sh (it supports both shells and must load)"'
+      case "$sh" in
+          bash) echo '[ "${BU_NVM_COMPLETION:-}" = loaded ] || echo "MISSING nvm bash_completion (bash should load it)"' ;;
+          zsh*) echo '[ -z "${BU_NVM_COMPLETION:-}" ] || echo "MISSING the skip (zsh must NOT load nvm bash_completion)"' ;;
+      esac
+    } > "$T/nvm-probe"
+    run "$sh" "$T/nvm-probe" "$HOMEDIR"
+    verdict "$sh: loads nvm.sh, and nvm's bash-only completion only under bash"
+done
 
 # --- 6. nounset, and a HOME whose path contains a space ----------------------
 { load_lines 'set -u'; } > "$T/nounset"
