@@ -33,6 +33,35 @@ BU="$(cd "$(dirname "$_ENV_SCRIPT_PATH")" && pwd)"
 export BU
 unset _ENV_SCRIPT_PATH
 
+# -----------------------------------------------------------------------------
+# Turn alias expansion off for everything this file loads, then restore it.
+#
+# Both shells expand aliases at PARSE time -- zsh always, bash whenever
+# expand_aliases is on, which it is in every interactive shell. So if you
+# already have, say, `alias backup=...` or `alias info=...`, then the line
+# `backup() {` in lib/common.bash is not a warning: it is a parse error that
+# ABORTS THE REST OF THAT FILE, leaving a half-loaded lib/common.bash whose
+# missing helpers break bin/ and setup-env.sh in ways that point nowhere near
+# the real cause. The chain below defines 64 top-level function names, among
+# them err, info, ok, die, have, ask, confirm, step and backup -- all of them
+# plausible things for a shell to already alias.
+#
+# Switching expansion off is better than clearing those names with `unalias`:
+# it protects the parse without destroying aliases you chose to have. Your
+# aliases are untouched and work again as soon as the option is restored below.
+#
+# FAILURE MODE: if env.sh is edited into a parse error between here and the
+# restore at the bottom, alias expansion stays off for that one shell until it
+# is reloaded. CI parses this file with both `bash -n` and `zsh -n` to keep
+# that window shut.
+# -----------------------------------------------------------------------------
+_bu_alias_opt=none
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+    if [[ -o aliases ]]; then _bu_alias_opt=zsh; unsetopt aliases; fi
+elif shopt -q expand_aliases 2>/dev/null; then
+    _bu_alias_opt=bash; shopt -u expand_aliases
+fi
+
 # path_prepend VAR DIR - put DIR at the front of the colon list VAR, once.
 # Used by lib/init-*.bash too, so re-sourcing (`so`) never grows a path.
 path_prepend() {
@@ -61,3 +90,11 @@ unset _env_module
 
 # Aliases last, so they can use everything above.
 [[ -f "$BU/alias" ]] && source "$BU/alias"
+
+# Restore alias expansion to exactly the state it was in on entry. Keep this
+# last: everything above is inside the window opened near the top of this file.
+case "$_bu_alias_opt" in
+    zsh) setopt aliases ;;
+    bash) shopt -s expand_aliases ;;
+esac
+unset _bu_alias_opt

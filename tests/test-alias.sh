@@ -103,8 +103,13 @@ EOT
 
 if command -v zsh >/dev/null 2>&1; then
     probe "zsh " zsh
+elif [ -n "${CI:-}" ]; then
+    # zsh is the shell this whole file is about: it expands aliases at parse
+    # time and bash (non-interactively) does not. Skipping it in CI would make
+    # a green build mean almost nothing here.
+    check "zsh is installed (required when CI is set)" 1 "(install zsh in the workflow)"
 else
-    echo "  skip zsh not installed"
+    echo "  skip zsh not installed (set CI=1 to make this a failure instead)"
 fi
 probe "bash" bash
 

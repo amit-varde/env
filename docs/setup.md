@@ -144,6 +144,14 @@ first.
   time, so without that an alias you already have turns a function definition
   into a parse error that aborts the rest of the file and silently costs you
   every alias below it
+- `tests/test-env-load.sh` — `env.sh` and every `lib/init-*.bash` load cleanly
+  under `zsh` and `bash`: no stderr, `BU` and `PATH` set, the last function in
+  `lib/common.bash` and the last alias in `alias` both defined (the proof that
+  nothing aborted partway), every module's effect present, re-sourcing (`so`)
+  leaves `PATH` and `MANPATH` unchanged, and the whole chain still loads when
+  all 64 function names it defines are already aliases. It also parses every
+  file a login sources with *both* `bash -n` and `zsh -n`, since neither parser
+  rejects everything the other does
 - `tests/test-gu-worktree.sh` — `gu worktree` add/list/remove/prune and the lock
   hook in linked worktrees, against a throwaway repo
 - `tests/test-gu-fork.sh` — `gu fork` wire, status, pull, land, send and take
@@ -159,6 +167,13 @@ first.
 - a check that the pre-commit hook still refuses a commit carrying a fake AWS
   key or a blocklisted term, in a throwaway repo, so a change that quietly
   disables the hook fails the build
+
+`tests/test-alias.sh` and `tests/test-env-load.sh` need `zsh`, which the
+workflow installs on the Linux runner (macOS has it as the default shell). Both
+skip their zsh half when `zsh` is missing and no `CI` variable is set, so a
+developer without zsh can still run them — but when `CI` is set a missing zsh
+is a failure, because a quietly skipped half is the gap these two were written
+to close.
 
 Every test builds its own `HOME`, `WORK` and git repos under its own temporary
 directory and puts fakes for `gh`, `ssh` and `curl` on `PATH`. Nothing outside
