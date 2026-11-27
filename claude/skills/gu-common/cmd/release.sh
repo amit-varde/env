@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: release [repo] [--target BRANCH] - last tag, what merged since, grouped notes draft and the suggested next version
 main() {
   local repo="" target="" a

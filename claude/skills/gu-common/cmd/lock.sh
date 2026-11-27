@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: lock <repo>... [--level git|files|full] [--recursive] [--reason TEXT] - lock repos against accidental changes
 # git:   hooks (core.hooksPath -> <gitdir>/gu-lock/hooks) refuse every local ref change except
 #        refs/remotes/* (reference-transaction; --no-verify can't skip it) and any push. Fetch works.

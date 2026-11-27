@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: update ff|default|stash-pull <repo> [--rebase] - one safe update step (used by gu-update); refuses anything risky
 # ff          behind and not ahead: pull --ff-only, then sync moved submodules if they are clean.
 #             A dirty tree is included when every local change already matches the incoming

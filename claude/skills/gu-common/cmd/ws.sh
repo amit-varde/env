@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: ws [--fetch] [--all] [--plan] [repo...] - status table of every repo under $WORK + submodules; --plan adds the update bucket
 # Read-only (fetch only touches remote-tracking refs). Rows: repo|branch|upstream|behind/ahead|default|
 # default_behind/ahead|dirty|untracked|stash|op|last commit|notes[|bucket]. Submodule rows are indented and

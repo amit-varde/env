@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: prs [mine|review|repo] [--repo owner/name] - PR lists; repo = open PRs here with CI/review/mergeable (default: mine)
 main() {
   local mode="${1:-mine}"; [ $# -gt 0 ] && shift

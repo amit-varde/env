@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: ctx [repo] [--no-fetch] [--no-gh] - everything a gu-* skill needs to know about one repo, in one call
 # Read-only (fetch touches remote-tracking refs only). Sections: identity, branch/sync, working tree,
 # unpushed commits, submodules, PR for this branch, protection, repo guides/templates/CI, commit style.

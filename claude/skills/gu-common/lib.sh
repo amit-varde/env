@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 # gu-common/lib.sh - shared functions for the gu-* skill kit. Sourced by bin/gu.
 # Bash 3.2 compatible (macOS /bin/bash). No here-docs/here-strings: bash 3.2
 # needs a writable temp dir for them, which fails inside locked repos.

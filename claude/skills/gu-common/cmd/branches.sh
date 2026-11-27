@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: branches [repo] [--base B] [--no-gh] - branch inventory: kind|branch|ahead/behind|last commit|author|pr
 # Kinds: REMOTE_UNMERGED (on origin, ahead of base), LOCAL_MERGED (safe to delete with -d), LOCAL_GONE
 # (upstream deleted), LOCAL_UNPUSHED (commits on no remote), LOCAL_SQUASHED (merged PR, not an ancestor).

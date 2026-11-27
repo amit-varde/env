@@ -321,7 +321,7 @@ env_conf_get() {
     local key="$1" f="${2:-}"
     [ -n "$f" ] || return 0
     [ -f "$f" ] || return 0
-    sed -n "s/^[[:space:]]*$key[[:space:]]*=[[:space:]]*//p" "$f" \
+    sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" "$f" \
         | sed -e 's/[[:space:]]*#.*$//' \
               -e 's/^"\(.*\)"$/\1/' \
               -e "s/^'\(.*\)'\$/\1/" \

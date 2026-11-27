@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: auth - diagnose gh/git GitHub auth: accounts, token state, scopes, env overrides, git credential helper, protocol -> diagnosis codes
 # Never prints tokens. Diagnosis codes map to gu-auth/SKILL.md steps.
 main() {

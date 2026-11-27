@@ -19,6 +19,11 @@
 if [[ -n "${BASH_SOURCE:-}" ]]; then
     _ENV_SCRIPT_PATH="${BASH_SOURCE[0]}"
 elif [[ -n "${ZSH_VERSION:-}" ]]; then
+    # zsh's own idiom for "the path of the file being sourced". bash cannot
+    # parse it, but bash never gets here: BASH_SOURCE is set, so the branch
+    # above wins. shellcheck reads this file as bash (per the shebang), so it
+    # flags valid zsh. Disabled for this one line only, not file-wide.
+    # shellcheck disable=SC2296
     _ENV_SCRIPT_PATH="${(%):-%N}"
 else
     echo "ERROR: env.sh must be sourced from bash or zsh" >&2

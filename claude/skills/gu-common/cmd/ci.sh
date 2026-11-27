@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: ci [pr|--run ID|--branch B] [--repo owner/name] - failing CI: first errors from Actions logs, links for other CI, flakiness on the default branch
 # No argument: recent runs of the current branch.
 

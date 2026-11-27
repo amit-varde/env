@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: worktree list|add|move|remove|cleanup|reset - linked worktrees in <repo>/.claude/worktrees/<name> (Claude Code's default)
 # list [repo...] [--fetch] [--gh] [--view|--rows]
 #   On a terminal (or --view): grouped by repo, one line per linked worktree:

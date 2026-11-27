@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: threads [number] [--repo owner/name] [--all] - unresolved review threads: thread_id|comment_id|path:line|author|text
 main() {
   local all=0 a args=()

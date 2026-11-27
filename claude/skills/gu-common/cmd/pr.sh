@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: pr [number|branch|url] [--repo owner/name] - one PR: state, CI (failing/pending names), review, mergeability, behind, threads, merge options
 main() {
   pr_repo_args "$@"

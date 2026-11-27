@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: readme [range] [--staged] [repo] - README/docs check for a change: MISSING (new names not documented), STALE (removed names still mentioned), BROKEN links
 # range default: origin/<default>...HEAD. --staged also includes the index (for a commit about to be made).
 # Mechanical part only; the skill still judges whether changed behaviour is described correctly.

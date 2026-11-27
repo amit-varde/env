@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: locks [repo...] - which repos/submodules are locked: repo|state|level|since|reason
 main() {
   local r t lv

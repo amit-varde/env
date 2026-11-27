@@ -1,3 +1,4 @@
+# shellcheck shell=bash  # sourced by bin/gu, so no shebang of its own
 #: fork status|wire|pull|land|send|forks|take - keep a GitHub fork and its original in step, always through PRs (/gu-fork-sync)
 # status [repo] [--no-fetch] [--no-gh]
 #   Read-only. Role (fork or original), the upstream remote and whether pushing to it is disabled,
