@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/env-check
+# =============================================================================
+#
+# DESCRIPTION: Validate environment variables are set
+#   Validates that specified environment variables are set and non-empty.
+#   Displays the value of each variable (for set ones) or an error (for missing
+#   ones). Useful for verifying environment setup before running scripts.
+#
+# ARGUMENTS:
+#   VAR_NAME    One or more environment variable names to check
+#
+# EXIT CODES:
+#   0 - All variables are set and non-empty
+#   1 - One or more variables are missing or empty, or none were given
+#
+# USAGE:
+#   env-check VAR1 VAR2 VAR3     (also: check-env)
+#   env-check -h | --help
+#
+# EXAMPLES:
+#   # Check single variable
+#   env-check HOME
+#   # Output: HOME is set: /Users/username
+#
+#   # Check multiple variables
+#   env-check WORK PROJECT_NAME VIRTUAL_ENV
+#
+#   # Use in scripts for validation
+#   env-check JIRA_TOKEN API_KEY || exit 1
+#
+#   # Verify Python environment
+#   env-check VIRTUAL_ENV PYTHONPATH
+#
+# =============================================================================
+set -euo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+env_check() {
+    if [[ $# -eq 0 ]]; then show_help; return 1; fi
+
+    local var rc=0
+    for var in "$@"; do
+        if [[ -n "${!var:-}" ]]; then
+            success "$var is set: ${!var}"
+        else
+            err "$var is NOT set"
+            rc=1
+        fi
+    done
+    return $rc
+}
+
+env_check "$@"

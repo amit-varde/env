@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/run-make
+# =============================================================================
+#
+# DESCRIPTION: Run make targets with output capture to log file
+#   Executes make targets and captures both stdout and stderr to a log file
+#   while displaying output in the terminal. Validates that a Makefile exists
+#   before running.
+#
+# ARGUMENTS:
+#   target     Optional make target to run (default: first target in Makefile)
+#   args...    Additional arguments passed to make
+#
+# ENVIRONMENT VARIABLES:
+#   RUN_OUT            Output file path (default: $PROJECT_WORKSPACE/$USER.run.out)
+#   PROJECT_WORKSPACE  Base directory for output files (optional)
+#
+# EXIT CODES:
+#   0 - Make command succeeded
+#   1 - No Makefile found
+#   * - Exit code from make
+#
+# USAGE:
+#   run-make                   # Run default target
+#   run-make build             # Run 'build' target
+#   run-make test -j4          # Run 'test' with parallel jobs
+#   run-make -h | --help
+#
+# EXAMPLES:
+#   # Run default make target
+#   run-make
+#
+#   # Run specific target
+#   run-make clean
+#
+#   # Build with parallelism
+#   run-make build -j8
+#
+#   # Pass variables to make
+#   run-make install PREFIX=/usr/local
+#
+#   # Check build output
+#   run-make release && cat $RUN_OUT
+#
+# =============================================================================
+set -euo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+if [[ ! -f Makefile && ! -f makefile && ! -f GNUmakefile ]]; then
+    err "No Makefile found in the current directory."
+    exit 1
+fi
+exec "$BU/bin/run-cmd" make "$@"

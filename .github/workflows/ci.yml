@@ -1,0 +1,187 @@
+name: ci
+
+# This repo is public, so CI's first job is to stop anything private reaching it.
+# The pre-commit hook (setup-env.sh --only hooks) is the local half of that gate;
+# this workflow is the half that still runs after `git commit --no-verify`.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: secret and PII scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # .blocklist.local is git-ignored by design: a public repo cannot carry the
+      # list of names it must not mention. Supply it as a repository secret
+      # (Settings -> Secrets and variables -> Actions -> ENV_BLOCKLIST), one
+      # case-insensitive regex per line, and CI checks your own terms too.
+      # Secrets are NOT available to pull requests from forks, so on those runs
+      # the blocklist category is skipped and the other four still run.
+      - name: Write .blocklist.local from the ENV_BLOCKLIST secret
+        env:
+          ENV_BLOCKLIST: ${{ secrets.ENV_BLOCKLIST }}
+        run: |
+          if [ -n "${ENV_BLOCKLIST:-}" ]; then
+            printf '%s\n' "$ENV_BLOCKLIST" > .blocklist.local
+            echo "blocklist: $(grep -cvE '^[[:space:]]*(#|$)' .blocklist.local) term(s) loaded"
+          else
+            echo "::warning::ENV_BLOCKLIST is not set, so the blocklist category is skipped."
+            echo "Add it as a repository secret to have CI check your own terms."
+          fi
+
+      # BU is how bin/ scripts find the repo. Set it explicitly rather than
+      # relying on the fallback, so the scan can only ever read this checkout.
+      - name: env-scan
+        run: env BU="$PWD" bash bin/env-scan
+
+  lint:
+    name: shell syntax and shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      # Every file bash should be able to parse. Catches a broken edit even in a
+      # script no test happens to run.
+      - name: bash -n over every shell file
+        run: |
+          set -u
+          rc=0
+          while IFS= read -r f; do
+            [ -f "$f" ] || continue
+            first="$(head -1 "$f" 2>/dev/null || true)"
+            is_sh=0
+            case "$first" in '#!'*bash*|'#!'*/sh|'#!'*env' 'sh) is_sh=1 ;; esac
+            case "$f" in *.sh|*.bash) is_sh=1 ;; esac
+            case "$f" in dotfiles/cshrc|*.awk) is_sh=0 ;; esac
+            [ "$is_sh" -eq 1 ] || continue
+            if ! bash -n "$f"; then echo "::error file=$f::bash -n failed"; rc=1; fi
+          done <<EOF
+          $(git ls-files)
+          EOF
+          exit $rc
+
+      # --severity=error only, for now: the tree still has older style warnings,
+      # and a gate that is red from day one gets ignored. Raising this to
+      # "warning" is a deliberate follow-up, not a silent default.
+      - name: shellcheck (errors)
+        run: |
+          shellcheck --severity=error --external-sources \
+            bin/* lib/*.bash tools/*.sh scripts/*.sh tests/*.sh \
+            setup-env.sh bootstrap.sh env.sh \
+            claude/skills/gu-common/lib.sh claude/skills/gu-common/cmd/*.sh \
+            claude/skills/gu-common/bin/gu claude/skills/env-ssh/scripts/env-ssh.sh
+
+  test:
+    name: tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # test-bootstrap.sh drives bootstrap.sh's prompts through a pseudo-terminal.
+      # macOS runners already ship expect.
+      - name: Install expect
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y expect
+
+      # bootstrap.sh carries its own copies of the helpers in lib/common.bash and
+      # its own ENV_REPO default, because it runs before any clone exists. This
+      # fails the build when a copy drifts.
+      - name: bootstrap.sh is in step with the repo
+        run: ./tests/check-helper-drift.sh
+
+      # Each test builds a throwaway HOME, WORK and git repos under its own temp
+      # directory and puts fakes for gh/ssh/curl on PATH, so none of this touches
+      # the runner outside that directory or reaches the network.
+      - name: tool manifest and change log
+        run: ./tests/test-setup-env-tools.sh
+
+      - name: gu worktree and the lock hook
+        run: ./tests/test-gu-worktree.sh
+
+      - name: gu fork
+        run: ./tests/test-gu-fork.sh
+
+      - name: bootstrap.sh prompts (pseudo-terminal)
+        run: ./tests/test-bootstrap.sh
+
+      - name: Cursor Desktop shortcut
+        if: runner.os == 'macOS'
+        run: ./tests/test-create-cursor-shortcut.sh
+
+      # A real install against this checkout, into a HOME whose path contains a
+      # space. Skips `repo` (nothing to clone: the checkout is the repo) and
+      # `tools` (it would install Homebrew and friends onto the runner).
+      # The ssh step finds no terminal and no SSH_CONFIG_PASS_FILE, so it skips
+      # decrypting the published *.conf.gpg instead of hanging on a passphrase.
+      - name: setup-env.sh into a HOME with a space, then env-doctor
+        run: |
+          set -eu
+          base="${RUNNER_TEMP:-/tmp}"
+          home="$base/ci home"
+          mkdir -p "$home"
+          export HOME="$home"
+          export SETUP_ENV_LOG="$home/.setup-env.log"
+          export SETUP_ENV_MANIFEST="$home/.setup-env.manifest"
+          unset BU || true
+          ./setup-env.sh -y --skip repo,tools
+          echo "--- re-run must be a no-op, not a second set of changes ---"
+          ./setup-env.sh -y --skip repo,tools
+          echo "--- health report ---"
+          ./bin/env-doctor || true
+          echo "--- change log ---"
+          cat "$SETUP_ENV_LOG"
+
+      # The hook is the local gate. Prove it actually refuses a bad commit, in a
+      # throwaway repo, so a change that quietly disables it fails the build.
+      - name: the pre-commit hook refuses a leaking commit
+        run: |
+          set -eu
+          repo="$PWD"
+          base="${RUNNER_TEMP:-/tmp}"
+          t="$base/hooktest"
+          rm -rf "$t"; mkdir -p "$t/bin" "$t/lib"
+          cd "$t"
+          cp "$repo/bin/env-scan" bin/
+          cp "$repo/lib/common.bash" "$repo/lib/term-colors.bash" "$repo/lib/scan-patterns.bash" lib/
+          : > env.sh
+          git init -q .
+          git config user.email ci@example.invalid  # env-scan:ignore - .invalid is reserved and unroutable
+          git config user.name CI
+          # A probe term, not a placeholder from blocklist.example: the README
+          # tells people to copy that file, so a term from it appearing here
+          # would make their very first scan flag this workflow.
+          printf 'zzz-blocklist-probe\n' > .blocklist.local
+          # Write the hook exactly as setup-env.sh's hooks step writes it.
+          SRC="$repo" bash -c 'source "$SRC/lib/common.bash"; hook_body' > .git/hooks/pre-commit
+          chmod 755 .git/hooks/pre-commit
+          echo hello > safe.txt && git add safe.txt
+          git commit -q -m safe
+          echo "clean commit allowed: ok"
+          # The id below is AWS's own published documentation example, not a
+          # credential. It has to look real: the point is to prove the hook
+          # refuses it. Hence the ignore marker on that line, not this one.
+          echo 'aws_key = AKIAIOSFODNN7EXAMPLE' > leak.txt && git add leak.txt  # env-scan:ignore
+          if git commit -q -m leak; then echo "::error::pre-commit hook let a secret through"; exit 1; fi
+          echo "secret refused: ok"
+          git reset -q && rm -f leak.txt
+          echo 'host zzz-blocklist-probe.example' > host.txt && git add host.txt
+          if git commit -q -m host; then echo "::error::pre-commit hook let a blocklisted term through"; exit 1; fi
+          echo "blocklisted term refused: ok"

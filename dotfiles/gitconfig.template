@@ -1,4 +1,5 @@
-# Copy to ~/.gitconfig and fill in the three placeholders (or, better, use per-account includes; see README).
+# Template for ~/.gitconfig. setup-env.sh --only dotfiles can fill in the two
+# placeholders for you when you have no ~/.gitconfig yet; it never changes one you have.
 [user]
 	name = YOUR NAME
 	email = YOUR_WORK_EMAIL
@@ -16,3 +17,9 @@
 	defaultBranch = main
 [pull]
 	rebase = true
+
+# One identity per employer or account: git applies the extra file only to repos under
+# that folder. Make ~/.gitconfig-<employer> with its own [user] block, then uncomment.
+# (Adjust the folder if your WORK is not ~/work.)
+# [includeIf "gitdir:~/work/<employer>/"]
+#	path = ~/.gitconfig-<employer>

@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/create-cursor-ide-shortcut
+# =============================================================================
+#
+# DESCRIPTION: Desktop app that opens a workspace in Cursor's IDE mode (macOS)
+#   Writes <Desktop>/<name>.app. Double-clicking it runs `cursor-ide --yes` on
+#   that directory, so Cursor opens in IDE mode. A plain .code-workspace file
+#   does not: Finder launches Cursor.app and skips cursor-ide.
+#
+#   The app is named after the directory (env -> env.app). Pass --name to
+#   choose another name when you give exactly one --dir. Its icon is
+#   cursor/icons/ide.jpg.
+#
+#   An app that is already there is replaced. Nothing is asked.
+#
+#   With no --dir it lists the directories directly under $WORK and asks which
+#   ones to create (Enter means all). -y answers all. With no terminal, pass
+#   --dir or -y.
+#
+# OPTIONS:
+#   --dir PATH      Workspace directory (repeatable). ~ and relative paths work
+#   --name NAME     App name, without .app. Only with a single --dir
+#   --desktop DIR   Where to write the apps (default: ~/Desktop)
+#   --work DIR      Where the interactive list looks (default: $WORK)
+#   -y, --yes       With no --dir: create one app per directory, no question
+#   -h, --help      Show this help
+#
+# EXIT CODES:
+#   0 - Apps written (or nothing chosen)
+#   1 - Not macOS, no Desktop, a path is not a directory, or a write failed
+#   2 - Bad option, or no --dir and no terminal to ask
+#
+# USAGE:
+#   create-cursor-ide-shortcut                         # ask, then create
+#   create-cursor-ide-shortcut -y                      # one app per directory under $WORK
+#   create-cursor-ide-shortcut --dir ~/work/env
+#   create-cursor-ide-shortcut --dir ./path/to/workspace --name "My Workspace"
+#   create-cursor-ide-shortcut -h | --help
+#
+# =============================================================================
+set -uo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+CURSOR_SHORTCUT_MODE=ide
+CURSOR_SHORTCUT_SUFFIX=
+CURSOR_SHORTCUT_ARGS=
+source "$BU/lib/cursor-shortcut.bash"

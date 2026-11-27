@@ -1,5 +1,10 @@
-# One case-insensitive extended-regex term per line. Copy to .blocklist.local (gitignored) and edit.
-# Anything matching is flagged by scripts/scan.sh and scripts/export-*.sh.
+# Terms the scan should flag, one case-insensitive extended regex per line.
+# Copy this file to .blocklist.local (git-ignored, per machine) and edit it. Lines
+# starting with # and empty lines are ignored. The terms below are placeholders.
+#
+# Consumed by bin/env-scan (and so by scripts/scan.sh and the pre-commit hook)
+# and by scripts/export-*.sh. Put your employer, project and host names here:
+# this file is the only thing standing between those names and a public commit.
 acme-corp
 internal-project-name
 your\.name@

@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/cursor-sync
+# =============================================================================
+#
+# DESCRIPTION: Keep Cursor's user settings in step with the repo's cursor/ folder
+#   The repo's cursor/ folder holds the shared baseline:
+#     cursor/settings.json      -> Cursor User/settings.json
+#     cursor/keybindings.json   -> Cursor User/keybindings.json (optional)
+#     cursor/extensions.txt     -> extensions to install (one id per line)
+#   "apply" links the two JSON files into Cursor's User folder (or copies them
+#   with --copy) and installs missing extensions. "export" goes the other way:
+#   it copies your current Cursor files and extension list back into cursor/ so
+#   you can commit them. Anything it replaces is first copied to
+#   <file>.bak-<timestamp>. Re-running it changes nothing that is already right.
+#
+#   User folder: macOS ~/Library/Application Support/Cursor/User,
+#                Linux ~/.config/Cursor/User
+#
+#   If Cursor's settings screen ever replaces the link with a regular file,
+#   "status" shows it as "differs"; run "export" to pull the changes into the
+#   repo, then "apply" to link it again.
+#
+# SUBCOMMANDS:
+#   status     Show the state of each file and the extension list (default)
+#   apply      Link (or copy) the files and install missing extensions
+#   export     Copy your Cursor files and extension list into cursor/
+#
+# OPTIONS:
+#   --copy           apply: copy the files instead of linking them
+#   --no-extensions  apply/export: leave extensions alone
+#   --force          apply: replace a differing file without asking (backup kept)
+#   --dry-run        Show what would be done; change nothing
+#   -h, --help       Show this help
+#
+# ENVIRONMENT (for testing): CURSOR_USER_DIR, CURSOR_CLI
+#
+# PREREQUISITES:
+#   - Extensions need the cursor command (Cursor installed); everything else
+#     works without it.
+#
+# EXIT CODES:
+#   0 - Done (or already up to date)
+#   1 - A differing file was left alone, or an extension failed to install
+#   2 - Bad usage
+#
+# USAGE:
+#   cursor-sync                  # status
+#   cursor-sync apply            # link settings, install extensions
+#   cursor-sync apply --dry-run
+#   cursor-sync export           # then: git -C "$BU" diff cursor/
+#   cursor-sync -h | --help
+#
+# =============================================================================
+set -uo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+SRC="$BU/cursor"
+FILES=(settings.json keybindings.json)
+STAMP="$(date +%Y%m%d-%H%M%S)"
+
+CMD=""; COPY=0; EXT=1; FORCE=0; DRY=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        status|apply|export) [ -z "$CMD" ] || { err "One subcommand only."; exit 2; }; CMD="$1" ;;
+        --copy) COPY=1 ;;
+        --no-extensions) EXT=0 ;;
+        --force) FORCE=1 ;;
+        --dry-run) DRY=1 ;;
+        *) err "Unknown argument: $1 (try --help)"; exit 2 ;;
+    esac
+    shift
+done
+CMD="${CMD:-status}"
+USER_DIR="$(cursor_user_dir)"
+rc=0
+
+# do_it CMD...: run it, or just show it with --dry-run
+do_it() { if [ "$DRY" -eq 1 ]; then echo "  [dry-run] $*"; else "$@"; fi; }
+
+backup() { do_it cp -P "$1" "$1.bak-$STAMP" && { [ "$DRY" -eq 1 ] || info "Backed up $1 -> $1.bak-$STAMP"; }; }
+
+# same_content A B: equal, ignoring a missing final newline
+same_content() { cmp -s <(awk 1 "$1") <(awk 1 "$2"); }
+
+# file_state NAME -> no-source | missing | linked | linked-elsewhere | identical | differs
+file_state() {
+    local src="$SRC/$1" dst="$USER_DIR/$1"
+    [ -f "$src" ] || { echo no-source; return; }
+    if [ -L "$dst" ]; then
+        if [ "$(readlink "$dst")" = "$src" ]; then echo linked; else echo linked-elsewhere; fi
+    elif [ ! -e "$dst" ]; then echo missing
+    elif same_content "$src" "$dst"; then echo identical
+    else echo differs; fi
+}
+
+installed_extensions() { # needs the cursor command; prints ids, lowercase, sorted
+    local cli; cli="$(cursor_find_cli "${BASH_SOURCE[0]}")" || return 1
+    "$cli" --list-extensions 2>/dev/null | tr 'A-Z' 'a-z' | sort -u
+}
+
+wanted_extensions() {
+    [ -f "$SRC/extensions.txt" ] || return 0
+    sed -e 's/#.*//' -e 's/[[:space:]]*$//' -e '/^$/d' "$SRC/extensions.txt" | tr 'A-Z' 'a-z'
+}
+
+cmd_status() {
+    local f st
+    info "Cursor User folder: $USER_DIR"
+    for f in "${FILES[@]}"; do
+        st="$(file_state "$f")"
+        case "$st" in
+            no-source)        printf '  %-18s not in the repo (cursor/%s); nothing to sync\n' "$f" "$f" ;;
+            missing)          printf '  %-18s missing: run "cursor-sync apply"\n' "$f" ;;
+            linked)           printf '  %-18s linked to the repo\n' "$f" ;;
+            linked-elsewhere) printf '  %-18s linked to %s, not the repo: run "cursor-sync apply --force"\n' "$f" "$(readlink "$USER_DIR/$f")" ;;
+            identical)        printf '  %-18s identical copy (not linked): "cursor-sync apply" will link it\n' "$f" ;;
+            differs)          printf '  %-18s DIFFERS from the repo: "cursor-sync export" keeps your version, "apply --force" keeps the repo version\n' "$f" ;;
+        esac
+    done
+    if [ "$EXT" -eq 1 ] && [ -f "$SRC/extensions.txt" ]; then
+        local have want missing
+        if have="$(installed_extensions)"; then
+            want="$(wanted_extensions)"
+            missing="$(comm -23 <(printf '%s\n' "$want") <(printf '%s\n' "$have") | sed '/^$/d')"
+            if [ -z "$missing" ]; then printf '  %-18s all %s installed\n' extensions "$(printf '%s\n' "$want" | sed '/^$/d' | wc -l | tr -d ' ')"
+            else printf '  %-18s missing: %s\n' extensions "$(echo $missing)"; fi
+        else
+            printf '  %-18s cannot check: no cursor command found\n' extensions
+        fi
+    fi
+}
+
+cmd_apply() {
+    local f st src dst ans
+    do_it mkdir -p "$USER_DIR"
+    for f in "${FILES[@]}"; do
+        src="$SRC/$f"; dst="$USER_DIR/$f"
+        st="$(file_state "$f")"
+        case "$st" in
+            no-source) continue ;;
+            linked) [ "$COPY" -eq 1 ] || { ok_line "$f already linked"; continue; } ;;
+            identical) [ "$COPY" -eq 0 ] || { ok_line "$f already a copy"; continue; } ;;
+            differs|linked-elsewhere)
+                if [ "$FORCE" -eq 0 ]; then
+                    if [ -t 0 ] && [ -t 1 ] && [ "$DRY" -eq 0 ]; then
+                        read -r -p "  $dst differs from the repo's cursor/$f. Replace it (a backup is kept)? [y/N] " ans
+                        case "$ans" in [Yy]*) ;; *) warn "Left $f alone. Run \"cursor-sync export\" to keep your version in the repo."; rc=1; continue ;; esac
+                    else
+                        warn "$f differs from the repo; left alone. Use \"cursor-sync export\" (keep yours) or \"apply --force\" (keep the repo's)."
+                        rc=1; continue
+                    fi
+                fi
+                ;;
+        esac
+        if [ -e "$dst" ] || [ -L "$dst" ]; then
+            if [ "$st" != identical ] && [ "$st" != linked ]; then backup "$dst"; fi
+            do_it rm -f "$dst"
+        fi
+        if [ "$COPY" -eq 1 ]; then do_it cp "$src" "$dst" && ok_line "Copied cursor/$f -> $dst"
+        else do_it ln -s "$src" "$dst" && ok_line "Linked $dst -> $src"; fi
+    done
+
+    if [ "$EXT" -eq 1 ]; then
+        local want have id cli
+        want="$(wanted_extensions)"
+        if [ -z "$want" ]; then :
+        elif ! cli="$(cursor_find_cli "${BASH_SOURCE[0]}")"; then
+            warn "No cursor command found; skipped extensions. Install Cursor, then re-run."
+        else
+            have="$(installed_extensions)"
+            for id in $want; do
+                if printf '%s\n' "$have" | grep -qxF "$id"; then ok_line "Extension $id already installed"
+                elif do_it "$cli" --install-extension "$id"; then ok_line "Installed extension $id"
+                else warn "Could not install $id"; rc=1; fi
+            done
+        fi
+    fi
+}
+
+cmd_export() {
+    local f st
+    [ -d "$USER_DIR" ] || { err "No Cursor User folder at $USER_DIR"; exit 2; }
+    do_it mkdir -p "$SRC"
+    for f in "${FILES[@]}"; do
+        if [ -L "$USER_DIR/$f" ] && [ "$(readlink "$USER_DIR/$f")" = "$SRC/$f" ]; then
+            ok_line "$f is already the repo's file"
+        elif [ -f "$USER_DIR/$f" ]; then
+            if [ -f "$SRC/$f" ] && same_content "$USER_DIR/$f" "$SRC/$f"; then ok_line "$f unchanged"
+            else do_it cp "$USER_DIR/$f" "$SRC/$f" && ok_line "Exported $f -> cursor/$f (review with: git -C \"$BU\" diff cursor/)"; fi
+        fi
+    done
+    if [ "$EXT" -eq 1 ]; then
+        local have
+        if have="$(installed_extensions)"; then
+            if [ "$DRY" -eq 1 ]; then echo "  [dry-run] write $(printf '%s\n' "$have" | sed '/^$/d' | wc -l | tr -d ' ') extensions to cursor/extensions.txt"
+            else
+                {
+                    echo '# Cursor extensions, one id per line. `cursor-sync apply` installs the missing ones;'
+                    echo '# `cursor-sync export` rewrites this list from what is installed.'
+                    printf '%s\n' "$have" | sed '/^$/d'
+                } > "$SRC/extensions.txt"
+                ok_line "Exported extension list -> cursor/extensions.txt"
+            fi
+        else
+            warn "No cursor command found; extension list not exported."
+        fi
+    fi
+}
+
+# In --dry-run, lines that report an action say what would happen.
+ok_line() {
+    if [ "$DRY" -eq 1 ]; then
+        case "$*" in Linked*|Copied*|Installed*|Exported*) printf '  would be: %s\n' "$*"; return ;; esac
+    fi
+    printf '  %s\n' "$*"
+}
+
+case "$CMD" in
+    status) cmd_status ;;
+    apply)  cmd_apply ;;
+    export) cmd_export ;;
+esac
+exit "$rc"

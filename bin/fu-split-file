@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/fu-split-file
+# =============================================================================
+#
+# DESCRIPTION: Split text files into smaller chunks at line boundaries
+#   Splits text files into smaller chunks at line boundaries. Ensures each split
+#   file contains only complete lines (no partial lines), rounding down the file
+#   size if necessary. Output files are numbered sequentially.
+#
+# ARGUMENTS:
+#   -f, --file <filename>   File to split (required)
+#   --size <size>           Target size per split file (e.g., 10MB, 2GB)
+#                           Suffixes K/KB, M/MB, G/GB (any case); decimals ok
+#   -out <dir>              Output directory for split files (optional)
+#                           Default: SPLITS_<basename> in current directory
+#
+# EXIT CODES:
+#   0 - Success
+#   1 - Invalid arguments or missing file
+#   2 - File processing error
+#
+# USAGE:
+#   fu-split-file -f data.txt --size 10MB
+#   fu-split-file -f data.txt --size 5MB -out ./output
+#   fu-split-file --file large.txt --size 2GB -out /tmp/splits
+#
+# EXAMPLES:
+#   # Split a log file into 50MB chunks
+#   fu-split-file -f app.log --size 50MB
+#
+#   # Split and specify output directory
+#   fu-split-file -f data.txt --size 10MB -out ./chunks
+#
+#   # Split with gigabyte size
+#   fu-split-file -f bigdata.csv --size 1GB -out /tmp/data_splits
+#
+# =============================================================================
+set -euo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+# parse_size 10MB -> bytes (1024-based). Fails on anything else.
+parse_size() {
+    [[ "$1" =~ ^([0-9]+(\.[0-9]+)?)([KkMmGg])[Bb]?$ ]] || return 1
+    local exp
+    case "${BASH_REMATCH[3]}" in K|k) exp=1 ;; M|m) exp=2 ;; *) exp=3 ;; esac
+    awk -v n="${BASH_REMATCH[1]}" -v e="$exp" 'BEGIN { printf "%d\n", n * 1024 ^ e }'
+}
+
+fu_split_file() {
+    local input_file="" size_spec="" output_dir=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f|--file) input_file="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
+            --size)    size_spec="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
+            -out)      output_dir="${2:-}"; shift $(( $# > 1 ? 2 : 1 )) ;;
+            *) err "Unknown option: $1 (see -h)"; return 1 ;;
+        esac
+    done
+
+    [[ -n "$input_file" ]] || { err "Missing required argument: -f <filename> (see -h)"; return 1; }
+    [[ -n "$size_spec" ]]  || { err "Missing required argument: --size <size> (see -h)"; return 1; }
+    [[ -f "$input_file" ]] || { err "File not found: $input_file"; return 1; }
+
+    local size_bytes
+    if ! size_bytes=$(parse_size "$size_spec") || [[ "$size_bytes" -le 0 ]]; then
+        err "Invalid size: $size_spec (use e.g. 500KB, 10MB, 2GB)"
+        return 1
+    fi
+
+    local base stem ext=""
+    base=$(basename "$input_file")
+    stem="${base%.*}"
+    [[ "$stem" != "$base" ]] && ext=".${base##*.}"
+    [[ -n "$output_dir" ]] || output_dir="SPLITS_${base}"
+    mkdir -p "$output_dir" || { err "Failed to create output directory: $output_dir"; return 2; }
+
+    info "Splitting file: $input_file"
+    info "Target size: $size_spec ($size_bytes bytes)"
+    info "Output directory: $output_dir"
+
+    # One awk pass. LC_ALL=C so length() counts bytes; a chunk only ever ends
+    # at a line boundary, and a single line longer than the target gets its own chunk.
+    local summary
+    if ! summary=$(LC_ALL=C awk -v max="$size_bytes" -v pre="$output_dir/$stem" -v ext="$ext" '
+        function next_file() { if (out) close(out); out = sprintf("%s.%02d%s", pre, ++n, ext); size = 0 }
+        BEGIN { next_file() }
+        { len = length($0) + 1
+          if (size > 0 && size + len > max) next_file()
+          print > out; size += len; lines++ }
+        END { if (lines == 0) printf "" > out; print n, lines + 0 }' "$input_file"); then
+        err "File splitting failed"
+        return 2
+    fi
+
+    info "Split complete: ${summary% *} files created"
+    info "Total lines processed: ${summary#* }"
+    success "File split completed successfully"
+}
+
+fu_split_file "$@"

@@ -1,0 +1,41 @@
+# -----------------------------------------------------------------------------
+# File: env/ssh/config.d/host.conf.template
+# Template for one host. Copy it, do not edit it in place:
+#
+#   cp ssh/config.d/host.conf.template ssh/config.d/<alias>.conf
+#
+# Then add a line to ssh/config, which is an explicit index - a file in this
+# directory is inert until it is listed there:
+#
+#   # <alias>   <one-line description>
+#   Include config.d/<alias>.conf
+#
+# Plaintext *.conf here is git-ignored. To publish a host, encrypt it:
+#
+#   ./scripts/export-ssh-config.sh      # writes <alias>.conf.gpg
+#
+# Shared settings only. User and IdentityFile are yours and belong in
+# config.d/local.conf, which ssh/config includes first, so they win.
+# -----------------------------------------------------------------------------
+
+Host <alias> <alias>.<your-domain>
+    HostName <alias>.<your-domain>
+
+    # Forward your local agent so the host can reach git without a key on it.
+    ForwardAgent yes
+
+    # Uncomment for hosts that are rebuilt and so change host keys. This trades
+    # away man-in-the-middle protection - only do it on a trusted network.
+    # StrictHostKeyChecking no
+    # UserKnownHostsFile /dev/null
+    # LogLevel ERROR
+
+    # X11 forwarding (export DISPLAY). A Mac needs XQuartz:
+    # brew install --cask xquartz (then log out and back in).
+    # XAuthLocation belongs in config.d/local.conf, it is path-specific.
+    # ForwardX11 yes
+    # ForwardX11Trusted yes
+
+    # Keep long sessions alive through NAT and idle timeouts.
+    ServerAliveInterval 60
+    ServerAliveCountMax 3

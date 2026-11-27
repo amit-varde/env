@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/env-check-path
+# =============================================================================
+#
+# DESCRIPTION: List the entries of a colon-separated path variable
+#   Prints the entries of PATH (or another path variable) numbered, then any
+#   duplicates. With a search term, highlights the entries that contain it.
+#   PATH by default, or --var NAME (e.g. --var MANPATH, --var PYTHONPATH).
+#   Aliases: check-path, and env-check-ld-library-path (= --var LD_LIBRARY_PATH).
+#
+# USAGE:
+#   env-check-path [--var NAME] [search_term]
+#   env-check-ld-library-path [search_term]
+#   env-check-path -h | --help
+#
+# EXAMPLES:
+#   env-check-path                  # all PATH entries + duplicates
+#   env-check-path brew             # highlight entries containing 'brew'
+#   env-check-ld-library-path ssl   # same for LD_LIBRARY_PATH
+#   env-check-path --var MANPATH    # any other path variable
+#
+# EXIT CODES:
+#   0 - Always (an unset variable is reported as a warning)
+#
+# =============================================================================
+set -euo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+env_check_path() {
+    local var=PATH
+    if [[ "${1:-}" == "--var" ]]; then
+        [[ -n "${2:-}" ]] || { err "--var needs a variable name"; return 1; }
+        var="$2"; shift 2
+    fi
+    local term="${1:-}" value="${!var:-}"
+
+    if [[ -z "$value" ]]; then
+        warn "$var is not set"
+        return 0
+    fi
+
+    local entries
+    entries=$(printf '%s\n' "$value" | tr ':' '\n')
+    if [[ -n "$term" ]]; then
+        info "Searching for \"$term\" in $var:"
+        printf '%s\n' "$entries" | nl -w2 -s' : ' | while IFS= read -r line; do
+            if [[ "$line" == *"$term"* ]]; then
+                printf '%s%s%s\n' "$ERR_COLOR" "$line" "$RESET"
+            else
+                printf '%s\n' "$line"
+            fi
+        done
+        return 0
+    fi
+
+    info "All $var entries:"
+    printf '%s\n' "$entries" | nl -w2 -s' : '
+    local duplicates
+    duplicates=$(printf '%s\n' "$entries" | sort | uniq -d)
+    if [[ -z "$duplicates" ]]; then
+        info "No duplicates found in $var"
+    else
+        err "Found duplicates:"
+        printf '%s\n' "$duplicates"
+    fi
+}
+
+env_check_path "$@"

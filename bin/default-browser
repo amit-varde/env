@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/default-browser
+# =============================================================================
+#
+# DESCRIPTION: Manage default browser settings. Toggle between Chrome and Choosy,
+#   or set either as the default browser. Uses system defaults and the 
+#   defaultbrowser utility to manage macOS browser preferences.
+#
+# SUBCOMMANDS:
+#   chrome       Set Chrome as the default browser
+#   choosy       Set Choosy as the default browser
+#   toggle       Toggle between Chrome and Choosy (default)
+#   current|view Show the current default browser
+#   install      Install defaultbrowser utility via homebrew
+#   help         Display this help message
+#
+# EXAMPLES:
+#   default-browser chrome              # Set Chrome as default
+#   default-browser choosy              # Set Choosy as default
+#   default-browser toggle              # Toggle between Chrome and Choosy
+#   default-browser current             # Show current default browser
+#   default-browser install             # Install defaultbrowser utility
+#
+# PREREQUISITES:
+#   - macOS system
+#   - defaultbrowser utility (auto-installable via homebrew)
+#   - homebrew (optional, required for auto-installation)
+#
+# EXIT CODES:
+#   0 - Success
+#   1 - Usage/parameter errors or invalid command
+#   2 - Execution failures (e.g., defaultbrowser not found)
+#
+# =============================================================================
+
+set -uo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+
+if [[ "$OSTYPE" != darwin* ]]; then
+    err "This utility requires macOS"
+    exit 2
+fi
+
+# Bundle ID of the current default HTTPS handler (exit 1 if unknown)
+browser_get_current() {
+    local current
+    current=$(defaults read ~/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure LSHandlers 2>/dev/null |
+        grep -A1 'LSHandlerURLScheme = https' | grep LSHandlerRoleAll | awk -F'"' '{print $2}')
+    [[ -n "$current" ]] || { echo unknown; return 1; }
+    echo "$current"
+}
+
+browser_identify() { # bundle ID -> display name
+    case "$1" in
+        *chrome*|*google*) echo "Chrome" ;;
+        *choosy*)          echo "Choosy" ;;
+        *)                 echo "$1" ;;
+    esac
+}
+
+browser_set() { # browser_set chrome|choosy
+    if ! defaultbrowser "$1" &>/dev/null; then
+        err "Failed to set $(browser_identify "$1") as default browser"
+        return 2
+    fi
+    info "✓ Default browser → $(browser_identify "$1")"
+}
+
+browser_toggle() {
+    local current
+    current=$(browser_get_current) || { err "Failed to determine current default browser"; return 2; }
+    if [[ "$current" == *chrome* ]]; then browser_set choosy; else browser_set chrome; fi
+}
+
+browser_show_current() {
+    local bundle_id
+    bundle_id=$(browser_get_current) || { err "Failed to determine current default browser"; return 1; }
+    info "Current default browser: $(browser_identify "$bundle_id") ($bundle_id)"
+}
+
+# browser_install [ask] - install defaultbrowser via Homebrew if missing;
+# with "ask", confirm first (used before commands that need it).
+browser_install() {
+    if command -v defaultbrowser &>/dev/null; then
+        [[ "${1:-}" == ask ]] || info "defaultbrowser is already installed"
+        return 0
+    fi
+    if ! command -v brew &>/dev/null; then
+        err "defaultbrowser is missing and Homebrew is not installed"
+        info "Install Homebrew from https://brew.sh, then: brew install defaultbrowser"
+        return 2
+    fi
+    if [[ "${1:-}" == ask ]]; then
+        local response
+        read -r -p "defaultbrowser is not installed. Install it with Homebrew? (y/n) " response
+        [[ "$response" == [yY] ]] || { info "Skipped. Install with: brew install defaultbrowser"; return 2; }
+    fi
+    info "Installing defaultbrowser..."
+    brew install defaultbrowser || { err "Failed to install defaultbrowser"; return 2; }
+    info "✓ defaultbrowser installed"
+}
+
+main() {
+    local cmd="${1:-toggle}"
+    case "$cmd" in
+        chrome|choosy)  browser_install ask && browser_set "$cmd" ;;
+        toggle)         browser_install ask && browser_toggle ;;
+        current|view)   browser_install ask && browser_show_current ;;
+        install)        browser_install ;;
+        help|--help|-h) show_help ;;
+        *) err "Unknown command: $cmd (see: default-browser help)"; return 1 ;;
+    esac
+}
+
+main "$@"

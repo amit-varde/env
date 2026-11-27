@@ -1,0 +1,321 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/env-doctor
+# =============================================================================
+#
+# DESCRIPTION: Read-only health report for this machine's env setup
+#   Checks that everything setup-env.sh wires up is still in place: the shell
+#   startup line and PATH, .env.host and WORK, the git/curl/gh/sqlite3
+#   prerequisites, ~/.claude settings and skills (each SKILL.md must have a
+#   name and description), Claude Code Mode (see docs/claude-code.md),
+#   the ~/.ssh links and permissions, Cursor settings and
+#   IDE mode, the Desktop shortcuts for WORK, and which dev tools are installed.
+#   It changes nothing. Every problem line says how to fix it.
+#
+#   Marks:  ok = fine   warn = worth fixing, nothing is broken   FAIL = broken
+#   Missing dev tools and missing Desktop shortcuts are warnings at most: they
+#   are optional.
+#
+# OPTIONS:
+#   -q, --quiet   Only print warn and FAIL lines (and the summary)
+#   -h, --help    Show this help
+#
+# EXIT CODES:
+#   0 - No FAIL lines (warnings are allowed)
+#   1 - At least one FAIL line
+#
+# USAGE:
+#   env-doctor
+#   env-doctor -q
+#   env-doctor -h | --help
+#
+# =============================================================================
+set -uo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+QUIET=0
+for a in "$@"; do
+    case "$a" in
+        -q|--quiet) QUIET=1 ;;
+        *) echo "Unknown option: $a (try --help)" >&2; exit 2 ;;
+    esac
+done
+
+if [ -t 1 ]; then G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; B=$'\033[1m'; Z=$'\033[0m'; else G=""; Y=""; R=""; B=""; Z=""; fi
+N_OK=0; N_WARN=0; N_FAIL=0
+section() { printf '\n%s%s%s\n' "$B" "$1" "$Z"; }
+good() { N_OK=$((N_OK + 1));     [ "$QUIET" -eq 1 ] || printf '  %sok%s    %s\n' "$G" "$Z" "$*"; }
+warn() { N_WARN=$((N_WARN + 1)); printf '  %swarn%s  %s\n' "$Y" "$Z" "$*"; }
+fail() { N_FAIL=$((N_FAIL + 1)); printf '  %sFAIL%s  %s\n' "$R" "$Z" "$*"; }
+have() { command -v "$1" >/dev/null 2>&1; }
+# phys DIR -> physical absolute path ("" when missing)
+phys() { ( cd -P "$1" 2>/dev/null && pwd -P ); }
+# same_file A B -> true when both resolve to the same file
+same_file() { [ -e "$1" ] && [ -e "$2" ] && [ "$(phys "$(dirname "$1")")/$(basename "$1")" = "$(phys "$(dirname "$2")")/$(basename "$2")" ] \
+    || { [ -e "$1" ] && [ -e "$2" ] && [ "$(realpath "$1" 2>/dev/null)" = "$(realpath "$2" 2>/dev/null)" ]; }; }
+
+OS="$(uname -s)"
+[ "$QUIET" -eq 1 ] || printf '%senv-doctor%s  (%s, repo %s)\n' "$B" "$Z" "$OS" "$BU"
+
+# ---- Repo and shell ------------------------------------------------------------
+section "Repo and shell"
+if [ -f "$BU/env.sh" ]; then good "env.sh found in $BU"; else fail "$BU/env.sh missing: re-run bootstrap.sh"; fi
+if [ -d "$BU/.git" ]; then
+    br="$(git -C "$BU" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+    good "git clone on branch ${br:-?}"
+    # A fork: the original is the `upstream` remote (bootstrap.sh --fork, /gu-fork-sync). No network here:
+    # behind is counted from the last fetch.
+    if up="$(git -C "$BU" remote get-url upstream 2>/dev/null)"; then
+        case "$(git -C "$BU" remote get-url --push upstream 2>/dev/null)" in
+            *no_push*) good "fork of $up; pushing to it is disabled (send changes with /gu-fork-sync)" ;;
+            *) warn "fork of $up, but pushing to it is enabled. Fix: gu fork wire $BU" ;;
+        esac
+        n="$(git -C "$BU" rev-list --count origin/HEAD..upstream/HEAD 2>/dev/null || true)"
+        [ -n "$n" ] && [ "$n" -gt 0 ] && warn "$n commit(s) in the original not in your fork (as of the last fetch). Pull them with /gu-fork-sync"
+    fi
+else
+    warn "$BU is not a git clone: updates need a real clone (re-run bootstrap.sh into an empty folder)"
+fi
+
+case "$(basename "${SHELL:-bash}")" in
+    zsh)  RC_LIST="$HOME/.zshrc" ;;
+    bash) RC_LIST="$HOME/.bashrc $HOME/.bash_profile $HOME/.profile" ;;
+    *)    RC_LIST="$HOME/.bashrc $HOME/.zshrc $HOME/.profile" ;;
+esac
+found_rc=""
+for rc in $RC_LIST; do
+    [ -f "$rc" ] && grep -qs 'env\.sh' "$rc" && { found_rc="$rc"; break; }
+done
+if [ -n "$found_rc" ]; then good "env.sh is sourced from $found_rc"
+else warn "No shell startup file sources env.sh (checked: $RC_LIST). Fix: ./setup-env.sh --only shell"; fi
+
+case ":$PATH:" in
+    *":$BU/bin:"*) good "$BU/bin is on PATH" ;;
+    *) warn "$BU/bin is not on PATH in this shell. Open a new terminal, or: source $BU/env.sh" ;;
+esac
+
+if [ -f "$BU/.env.host" ]; then
+    good ".env.host present"
+    W="$(WORK='' bash -c '. "$1/.env.host" 2>/dev/null; echo "${WORK:-}"' _ "$BU")"
+    if [ -z "$W" ]; then warn ".env.host does not set WORK"
+    elif [ -d "$W" ]; then good "WORK = $W"
+    else fail "WORK = $W does not exist. Create it or edit $BU/.env.host"; fi
+else
+    W=""
+    warn ".env.host missing. Fix: ./setup-env.sh --only host"
+fi
+
+# ---- Prerequisites ---------------------------------------------------------------
+section "Prerequisites"
+for t in git curl sqlite3; do
+    if have "$t"; then good "$t found"; else warn "$t missing. Fix: env-install ${t} (or your package manager)"; fi
+done
+if have gh; then
+    good "gh found"
+    if gh auth status >/dev/null 2>&1; then good "gh is logged in"; else warn "gh is not logged in. Fix: gh auth login"; fi
+else
+    warn "gh missing. Fix: env-install gh"
+fi
+
+# ---- Claude Code -----------------------------------------------------------------
+section "Claude Code settings and skills"
+CH="$HOME/.claude"
+if [ -L "$CH" ] && [ "$(phys "$CH")" = "$(phys "$BU/claude")" ]; then
+    good "~/.claude is the repo's claude/ folder"
+    CLAUDE_VIA_DIR=1
+else
+    CLAUDE_VIA_DIR=0
+    if same_file "$CH/settings.json" "$BU/claude/settings.json"; then good "~/.claude/settings.json is the repo's"
+    elif [ -f "$CH/settings.json" ]; then warn "~/.claude/settings.json is a separate file. Fix: ./setup-env.sh --only claude"
+    else warn "~/.claude/settings.json missing. Fix: ./setup-env.sh --only claude"; fi
+fi
+
+n_skills=0; n_bad=0; n_unlinked=0; unlinked=""
+for d in "$BU"/claude/skills/*/; do
+    [ -d "$d" ] || continue
+    d="${d%/}"; name="$(basename "$d")"
+    [ -f "$d/SKILL.md" ] || continue                  # helper folders (gu-common, synced) are not skills
+    n_skills=$((n_skills + 1))
+    # Front matter: first line ---, then name: and description: before the closing ---
+    if ! awk 'NR==1 && $0!="---"{exit} NR>1 && /^---$/{done=1; exit} /^name:/{n=1} /^description:/{d=1} END{exit !(done && n && d)}' "$d/SKILL.md"; then
+        n_bad=$((n_bad + 1)); fail "skill $name: SKILL.md needs front matter with name: and description:"
+    fi
+    if [ "$CLAUDE_VIA_DIR" -eq 0 ] && [ ! -e "$CH/skills/$name/SKILL.md" ]; then
+        n_unlinked=$((n_unlinked + 1)); unlinked="$unlinked $name"
+    fi
+done
+[ "$n_unlinked" -eq 0 ] || warn "$n_unlinked skill(s) not linked into ~/.claude/skills:$unlinked. Fix: ./setup-env.sh --only claude"
+if [ "$n_skills" -eq 0 ]; then warn "No skills found under $BU/claude/skills"
+elif [ "$n_bad" -eq 0 ] && [ "$n_unlinked" -eq 0 ]; then good "$n_skills skills with valid front matter, all reachable from ~/.claude/skills (Cursor reads them there too)"; fi
+# Dangling links in ~/.claude/skills
+if [ -d "$CH/skills" ]; then
+    for l in "$CH"/skills/*; do
+        [ -L "$l" ] && [ ! -e "$l" ] && warn "dangling skill link: $l. Fix: rm \"$l\" then ./setup-env.sh --only claude"
+    done
+fi
+
+CLAUDE_SETTINGS="$CH/settings.json"
+if [ -f "$CLAUDE_SETTINGS" ]; then
+    cm_line="$(CLAUDE_SETTINGS="$CLAUDE_SETTINGS" CLAUDE_LOCAL="$CH/settings.local.json" python3 - <<'PY' 2>/dev/null || true
+import json, os, sys
+
+def load(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+settings = os.environ["CLAUDE_SETTINGS"]
+local = os.environ.get("CLAUDE_LOCAL", "")
+val = None
+src = "unset"
+try:
+    val = load(settings).get("env", {}).get("CLAUDE_CODE_EXPERIMENTAL_CODE_MODE")
+    src = "settings.json"
+except (OSError, json.JSONDecodeError, TypeError):
+    print("parse-error\t")
+    sys.exit(0)
+if local and os.path.isfile(local):
+    try:
+        loc = load(local)
+        if isinstance(loc.get("env"), dict) and "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE" in loc["env"]:
+            val = loc["env"]["CLAUDE_CODE_EXPERIMENTAL_CODE_MODE"]
+            src = "settings.local.json"
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+if "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE" in os.environ:
+    val = os.environ["CLAUDE_CODE_EXPERIMENTAL_CODE_MODE"]
+    src = "shell"
+print(f"{val if val is not None else ''}\t{src}")
+PY
+)"
+    cm_val="${cm_line%%	*}"
+    cm_src="${cm_line#*	}"
+    case "$cm_val" in
+        1)
+            if [ "$cm_src" = "settings.json" ]; then
+                good "Code Mode on (CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 in shared settings.json)"
+            else
+                good "Code Mode on (CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1 via $cm_src)"
+            fi
+            ;;
+        0)
+            warn "Code Mode off (CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=0 via $cm_src). Fix: remove the override or set 1 in claude/settings.json"
+            ;;
+        parse-error)
+            warn "Could not read env.CLAUDE_CODE_EXPERIMENTAL_CODE_MODE from $CLAUDE_SETTINGS"
+            ;;
+        *)
+            if same_file "$CLAUDE_SETTINGS" "$BU/claude/settings.json" 2>/dev/null || [ "$CLAUDE_VIA_DIR" -eq 1 ]; then
+                warn "Code Mode flag missing in shared settings.json. Fix: pull env repo or set env.CLAUDE_CODE_EXPERIMENTAL_CODE_MODE to \"1\""
+            else
+                warn "Code Mode not enabled in $CLAUDE_SETTINGS. Fix: merge claude/settings.json from the env repo or set env.CLAUDE_CODE_EXPERIMENTAL_CODE_MODE to \"1\""
+            fi
+            ;;
+    esac
+else
+    warn "No ~/.claude/settings.json; Code Mode defaults off. Fix: ./setup-env.sh --only claude"
+fi
+
+if have claude; then
+    cv="$(claude --version 2>/dev/null | awk '{print $1}')"
+    if [ -n "$cv" ]; then
+        if python3 - "$cv" <<'PY' 2>/dev/null
+import sys
+def parse(v):
+    v = v.split("(", 1)[0].strip()
+    return tuple(int(x) for x in v.split(".")[:3])
+cur, need = parse(sys.argv[1]), (2, 1, 323)
+sys.exit(0 if cur >= need else 1)
+PY
+        then
+            good "claude $cv (>= 2.1.323 for Code Mode)"
+        else
+            warn "claude $cv is older than 2.1.323. Fix: claude update"
+        fi
+    fi
+else
+    warn "claude CLI not on PATH. Fix: env-install claude"
+fi
+
+# ---- SSH -------------------------------------------------------------------------
+section "SSH"
+if [ -d "$BU/ssh" ]; then
+    if same_file "$HOME/.ssh/config" "$BU/ssh/config"; then good "~/.ssh/config is the repo's ssh/config"
+    else warn "~/.ssh/config is not the repo's. Fix: ./setup-env.sh --only ssh (or the /env-ssh skill)"; fi
+    if [ -L "$HOME/.ssh/config.d" ] && [ "$(phys "$HOME/.ssh/config.d")" = "$(phys "$BU/ssh/config.d")" ]; then good "~/.ssh/config.d is the repo's ssh/config.d"
+    else warn "~/.ssh/config.d is not the repo's. Fix: ./setup-env.sh --only ssh"; fi
+    [ -f "$BU/ssh/config.d/local.conf" ] && good "local.conf (your user/key) present" \
+        || warn "ssh/config.d/local.conf missing: ssh will use your login name. Fix: ./setup-env.sh --only ssh"
+fi
+if [ -d "$HOME/.ssh" ]; then
+    m="$(file_mode "$HOME/.ssh")"
+    if [ "$m" = "700" ]; then good "~/.ssh permissions 700"; else warn "~/.ssh permissions are $m, want 700. Fix: chmod 700 ~/.ssh"; fi
+    bad_keys=""
+    for k in "$HOME"/.ssh/id_* ; do
+        [ -f "$k" ] || continue
+        case "$k" in *.pub) continue ;; esac
+        km="$(file_mode "$k")"; [ "$km" = "600" ] || bad_keys="$bad_keys $(basename "$k")($km)"
+    done
+    if [ -n "$bad_keys" ]; then warn "private keys not 600:$bad_keys. Fix: chmod 600 ~/.ssh/<key>"; fi
+else
+    warn "~/.ssh does not exist yet"
+fi
+
+# ---- Cursor ----------------------------------------------------------------------
+section "Cursor"
+mode="$("$BU/bin/cursor-ide" --check 2>/dev/null)"; rc=$?
+if [ "$rc" -eq 2 ] || { [ ! -d "$HOME/Library/Application Support/Cursor" ] && [ ! -d "$HOME/.config/Cursor" ] && ! have cursor; }; then
+    good "Cursor is not installed here; Cursor checks skipped"
+else
+    out="$("$BU/bin/cursor-sync" status 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
+    if   printf '%s\n' "$out" | grep -qE 'settings\.json +linked'; then good "Cursor settings.json is linked to the repo"
+    elif printf '%s\n' "$out" | grep -qE 'settings\.json +identical'; then warn "Cursor settings.json matches the repo but is a copy. Fix: cursor-sync apply"
+    elif printf '%s\n' "$out" | grep -qE 'settings\.json +missing'; then warn "Cursor settings.json is not applied. Fix: cursor-sync apply"
+    elif printf '%s\n' "$out" | grep -qE 'settings\.json'; then warn "Cursor settings.json differs from the repo. Fix: cursor-sync status, then cursor-sync apply (or export)"
+    fi
+    printf '%s\n' "$out" | grep -qE 'extensions +all' && good "Cursor extensions installed"
+    printf '%s\n' "$out" | grep -qE 'extensions +missing' && warn "Cursor extensions missing. Fix: cursor-sync apply"
+    case "$mode" in
+        editor) good "Cursor opens in IDE (editor) mode" ;;
+        agent)  warn "Cursor is set to Agents mode. Fix: quit Cursor, run cursor-ide (the alias 'cursor' does this)" ;;
+        *)      warn "Cursor layout unknown ($mode)" ;;
+    esac
+    # Aliases are invisible to a script, so check the repo's alias file instead.
+    if grep -qE "^alias cursor=.?cursor-ide" "$BU/alias" 2>/dev/null; then good "alias 'cursor' goes through cursor-ide (IDE mode)"
+    else warn "alias 'cursor' does not point at cursor-ide in $BU/alias"; fi
+fi
+
+# ---- Desktop shortcuts -----------------------------------------------------------
+section "Desktop shortcuts"
+if [ -x "$BU/bin/create-work-shortcuts" ] && [ -n "$W" ] && [ -d "$W" ]; then
+    out="$("$BU/bin/create-work-shortcuts" --list --work "$W" 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
+    if printf '%s\n' "$out" | grep -qi 'no desktop'; then good "No Desktop folder here; shortcuts not applicable"
+    else
+        miss="$(printf '%s\n' "$out" | grep -cE ' would (create|update)' || true)"
+        if [ "${miss:-0}" -gt 0 ]; then warn "$miss project folder(s) in WORK lack an up-to-date Desktop shortcut. Fix: create-work-shortcuts"
+        else good "Desktop shortcuts match the folders in WORK"; fi
+    fi
+else
+    good "Skipped (no WORK set or create-work-shortcuts missing)"
+fi
+
+# ---- Dev tools -------------------------------------------------------------------
+section "Dev tools (optional)"
+if [ -x "$BU/tools/install.sh" ]; then
+    missing=""
+    while IFS= read -r line; do
+        case "$line" in TOOL*|"") continue ;; esac
+        t="$(echo "$line" | awk '{print $1}')"
+        if echo "$line" | grep -q 'missing'; then
+            echo "$line" | grep -q 'manual on this OS' || missing="$missing $t"
+        fi
+    done < <("$BU/tools/install.sh" --list 2>/dev/null)
+    if [ -z "$missing" ]; then good "All installable tools are present"
+    else warn "Not installed:$missing. Fix: env-install$missing (optional)"; fi
+fi
+
+# ---- Summary ---------------------------------------------------------------------
+printf '\n%s%d ok, %d warning(s), %d failure(s)%s\n' "$B" "$N_OK" "$N_WARN" "$N_FAIL" "$Z"
+[ "$N_FAIL" -eq 0 ]

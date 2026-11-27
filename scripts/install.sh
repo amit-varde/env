@@ -1,81 +1,39 @@
 #!/usr/bin/env bash
-# Install on a new machine/account. Backs up anything it would replace. Safe to re-run.
-# Usage: ./scripts/install.sh [--dry-run] [--authorize-keys]
-set -u; . "$(dirname "$0")/lib.sh"
-DRY=0; AUTH=0
-for a in "$@"; do case "$a" in --dry-run) DRY=1;; --authorize-keys) AUTH=1;; esac; done
-run() { if [ $DRY -eq 1 ]; then echo "[dry-run] $*"; else "$@"; fi; }
-put() { # src dst
-  [ -f "$1" ] || return 0
-  if [ -f "$2" ] && ! cmp -s "$1" "$2"; then run cp "$2" "$2.bak.$(date +%Y%m%d%H%M%S)"; fi
-  run cp "$1" "$2"; echo "installed $2"
-}
-put "$ROOT/dotfiles/zshrc"  "$HOME/.zshrc"
-put "$ROOT/dotfiles/bashrc" "$HOME/.bashrc"
-put "$ROOT/dotfiles/cshrc"  "$HOME/.cshrc"
-put "$ROOT/dotfiles/vimrc"  "$HOME/.vimrc"
-[ -f "$HOME/.gitconfig" ] || echo "NOTE: copy dotfiles/gitconfig.template to ~/.gitconfig and fill in name/email (not auto-installed)"
-run mkdir -p "$HOME/.claude"
-[ -f "$HOME/.claude/CLAUDE.md" ]    && echo "kept existing ~/.claude/CLAUDE.md (merge by hand)"    || put "$ROOT/claude/CLAUDE.md"    "$HOME/.claude/CLAUDE.md"
-[ -f "$HOME/.claude/settings.json" ] && echo "kept existing ~/.claude/settings.json (merge by hand)" || put "$ROOT/claude/settings.json" "$HOME/.claude/settings.json"
-run mkdir -p "$HOME/.ssh"
-run chmod 700 "$HOME/.ssh"
-put "$ROOT/ssh/config" "$HOME/.ssh/config"
-perm_src="$ROOT/.ssh/perms.sh"
-perm_dst="$HOME/.ssh/perms.sh"
-if [ -L "$perm_dst" ] && [ "$(readlink "$perm_dst")" = "$perm_src" ]; then
-  echo "linked $perm_dst"
-elif [ $DRY -eq 1 ]; then
-  echo "[dry-run] ln -sfn $perm_src $perm_dst"
-else
-  if [ -e "$perm_dst" ] || [ -L "$perm_dst" ]; then
-    mv "$perm_dst" "$perm_dst.bak.$(date +%Y%m%d%H%M%S)"
-  fi
-  ln -s "$perm_src" "$perm_dst"
-  chmod 700 "$perm_src"
-  echo "linked $perm_dst"
-fi
-# ~/.ssh/config.d points at this repo, so host entries have one copy.
-link="$HOME/.ssh/config.d"
-target="$ROOT/ssh/config.d"
-if [ -L "$link" ] && [ "$(readlink "$link")" = "$target" ]; then
-  echo "linked $link"
-elif [ $DRY -eq 1 ]; then
-  echo "[dry-run] ln -sfn $target $link"
-else
-  if [ -e "$link" ] || [ -L "$link" ]; then
-    bak="$link.bak.$(date +%Y%m%d%H%M%S)"
-    mv "$link" "$bak"
-    echo "saved previous $link at $bak"
-  fi
-  ln -s "$target" "$link"
-  echo "linked $link"
-fi
-shopt -s nullglob
-for enc in "$ROOT"/ssh/config.d/*.conf.gpg; do
-  dst="${enc%.gpg}"
-  if [ $DRY -eq 1 ]; then
-    echo "[dry-run] gpg --decrypt ${enc#$ROOT/} -> ${dst#$ROOT/}"
-    continue
-  fi
-  tmp="$(mktemp)"
-  if gpg --decrypt -o "$tmp" "$enc"; then
-    if [ -f "$dst" ] && ! cmp -s "$tmp" "$dst"; then
-      cp "$dst" "$HOME/.ssh/$(basename "$dst").bak.$(date +%Y%m%d%H%M%S)"
-    fi
-    mv "$tmp" "$dst"
-    chmod 600 "$dst"
-    echo "installed $dst"
-  else
-    rm -f "$tmp"
-    echo "could not decrypt ${enc#$ROOT/}"
-    exit 1
-  fi
+# Install this repo onto a machine or account. Safe to re-run.
+#
+# This is a shim. The installer is ./setup-env.sh, which does everything this
+# script used to do and more: shell wiring, SSH (including decrypting the
+# published ssh/config.d/*.conf.gpg and linking ~/.ssh/perms.sh), Claude Code
+# settings and skills, dotfiles, Cursor, dev tools and the health report. It
+# asks before every change, backs up whatever it replaces, and records what it
+# did in ~/.setup-env.log. Keeping two installers meant two sets of rules for
+# the same files, so there is now one.
+#
+# Usage:
+#   ./scripts/install.sh [--authorize-keys] [-y] [--only STEPS] [--skip STEPS]
+#   ./scripts/install.sh --dry-run        # list the steps; changes nothing
+#
+# Everything is passed through to ./setup-env.sh; see `./setup-env.sh --help`.
+set -u
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENTRY="$ROOT/setup-env.sh"
+[ -f "$ENTRY" ] || { echo "$ENTRY not found" >&2; exit 1; }
+
+args=()
+for a in "$@"; do
+  case "$a" in
+    --dry-run)
+      # setup-env.sh has no --dry-run: it is interactive and confirms each
+      # change instead. Show what would run rather than pretending to simulate.
+      echo "setup-env.sh asks before every change, so there is no separate dry run."
+      echo "Steps it would work through, in order:"
+      bash "$ENTRY" --list-steps | sed 's/^/  /'
+      echo
+      echo "Run one step at a time with:  ./setup-env.sh --only <step>"
+      exit 0 ;;
+    *) args+=("$a") ;;
+  esac
 done
-if [ $AUTH -eq 1 ]; then
-  run mkdir -p "$HOME/.ssh"; run chmod 700 "$HOME/.ssh"; touch "$HOME/.ssh/authorized_keys" 2>/dev/null
-  for k in "$ROOT"/.ssh/keys/*.pub; do [ -f "$k" ] || continue
-    grep -qF "$(awk '{print $2}' "$k")" "$HOME/.ssh/authorized_keys" 2>/dev/null || { run sh -c "cat '$k' >> '$HOME/.ssh/authorized_keys'"; echo "authorized $(basename "$k")"; }
-  done; run chmod 600 "$HOME/.ssh/authorized_keys"
-fi
-echo "Create ~/.zshrc.local / ~/.bashrc.local for employer-specific settings (they are sourced if present)."
+
+echo "scripts/install.sh now runs ./setup-env.sh (see the header of this file)."
+if [ "${#args[@]}" -gt 0 ]; then exec bash "$ENTRY" "${args[@]}"; else exec bash "$ENTRY"; fi

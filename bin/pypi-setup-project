@@ -1,0 +1,281 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/pypi-setup-project
+# =============================================================================
+#
+# DESCRIPTION: Create PyPI packaging files (pyproject.toml, setup.py)
+#   Unified tool for creating PyPI-compliant project files. Generates
+#   pyproject.toml, setup.py, MANIFEST.in and the package __init__.py
+#   with sensible defaults (Python >=3.10, Proprietary license). Author name and
+#   email come from `git config user.name` / `user.email` in the project; the
+#   project URLs come from its `origin` remote (omitted if there is no remote).
+#
+# SUBCOMMANDS:
+#   all [git_root] [project_name]
+#       Creates all PyPI-compliant files in one operation (each subcommand
+#       below). LICENSE is not generated; add your own.
+#
+#   pyproject [git_root] [project_name]
+#       Creates pyproject.toml with modern Python packaging configuration
+#       including build system, project metadata, and tool configurations.
+#
+#   setup [git_root]
+#       Creates minimal setup.py that delegates to pyproject.toml.
+#
+#   manifest [git_root]
+#       Creates MANIFEST.in for source distribution packaging.
+#
+#   package [git_root] [project_name]
+#       Creates src/<package_name>/__init__.py with version and metadata.
+#
+# ARGUMENTS:
+#   git_root       Project root directory (default: current directory)
+#   project_name   Project name (default: directory name)
+#
+# FILES CREATED:
+#   pyproject.toml    Modern Python build configuration
+#   setup.py          Minimal setuptools compatibility
+#   MANIFEST.in       Source distribution manifest
+#   src/<pkg>/__init__.py  Package initialization
+#
+# EXIT CODES:
+#   0 - Success (existing files are skipped)
+#   1 - Unknown command or failed operation
+#
+# USAGE:
+#   pypi-setup-project all [git_root] [name]
+#   pypi-setup-project pyproject [git_root] [name]
+#   pypi-setup-project setup [git_root]
+#   pypi-setup-project manifest [git_root]
+#   pypi-setup-project package [git_root] [name]
+#   pypi-setup-project -h | --help
+#
+# EXAMPLES:
+#   # Create all files in current directory
+#   pypi-setup-project all
+#
+#   # Create all files for specific project
+#   pypi-setup-project all . my-project
+#
+#   # Create only pyproject.toml
+#   pypi-setup-project pyproject
+#
+#   # Create package structure
+#   pypi-setup-project package . my-project
+#
+# =============================================================================
+set -euo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+# -----------------------------------------------------------------------------
+# Helper: _default_name <git_root> [name] - the name, else the directory's name
+# -----------------------------------------------------------------------------
+_default_name() {
+    if [[ -n "${2:-}" ]]; then echo "$2"; else basename "$(cd "$1" && pwd)"; fi
+}
+
+# -----------------------------------------------------------------------------
+# Helper: _write_once <file> - write stdin to <file> unless it already exists
+# -----------------------------------------------------------------------------
+_write_once() {
+    if [[ -f "$1" ]]; then
+        warn "$(basename "$1") already exists, skipping"
+        cat >/dev/null
+        return 0
+    fi
+    info "Creating $1..."
+    mkdir -p "$(dirname "$1")" || { err "Failed to create $(dirname "$1")"; return 1; }
+    cat > "$1"
+    info "Created $1"
+}
+
+# -----------------------------------------------------------------------------
+# Helper: _project_meta <git_root> - set AUTHOR_NAME, AUTHOR_EMAIL, REPO_URL
+# -----------------------------------------------------------------------------
+_project_meta() {
+    local git_root="${1:-.}" remote
+    AUTHOR_NAME=$(git -C "$git_root" config user.name 2>/dev/null || true)
+    AUTHOR_EMAIL=$(git -C "$git_root" config user.email 2>/dev/null || true)
+    remote=$(git -C "$git_root" remote get-url origin 2>/dev/null || true)
+    # git@host:org/repo.git | ssh://git@host/org/repo.git | https://host/org/repo.git -> https://host/org/repo
+    REPO_URL=$(printf '%s' "$remote" | sed -E \
+        -e 's#^git@([^:]+):#https://\1/#' \
+        -e 's#^ssh://([^@]+@)?#https://#' \
+        -e 's#^https://[^@/]+@#https://#' \
+        -e 's#\.git$##')
+    [[ -z "$AUTHOR_NAME" ]] && { warn "git user.name not set; author name left empty"; AUTHOR_NAME="${USER:-}"; }
+    [[ -z "$AUTHOR_EMAIL" ]] && warn "git user.email not set; author email left empty"
+    [[ -z "$REPO_URL" ]] && warn "no 'origin' remote; [project.urls] omitted"
+    return 0
+}
+
+# -----------------------------------------------------------------------------
+# Subcommand: pyproject - Create pyproject.toml
+# -----------------------------------------------------------------------------
+_create_pyproject_toml() {
+    local git_root="${1:-.}" project_name
+    project_name=$(_default_name "$git_root" "${2:-}")
+
+    local AUTHOR_NAME AUTHOR_EMAIL REPO_URL urls_block=""
+    _project_meta "$git_root"
+    if [[ -n "$REPO_URL" ]]; then
+        urls_block="[project.urls]
+Homepage = \"$REPO_URL\"
+Documentation = \"$REPO_URL#readme\"
+Repository = \"$REPO_URL\"
+Issues = \"$REPO_URL/issues\"
+"
+    fi
+
+    _write_once "$git_root/pyproject.toml" << EOF
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "$project_name"
+version = "0.1.0"
+description = "$project_name"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Proprietary"}
+authors = [
+    {name = "$AUTHOR_NAME", email = "$AUTHOR_EMAIL"}
+]
+keywords = ["development", "utilities"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: Other/Proprietary License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "black>=22.0",
+    "flake8>=4.0",
+    "mypy>=0.950",
+    "twine>=3.4",
+    "build>=0.8",
+]
+
+$urls_block
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312', 'py313']
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+EOF
+}
+
+# -----------------------------------------------------------------------------
+# Subcommand: setup - Create setup.py
+# -----------------------------------------------------------------------------
+_create_setup_py() {
+    _write_once "${1:-.}/setup.py" << 'EOF'
+"""
+Minimal setup.py for setuptools integration.
+Configuration is managed in pyproject.toml.
+"""
+from setuptools import setup
+
+setup()
+EOF
+}
+
+# -----------------------------------------------------------------------------
+# Subcommand: manifest - Create MANIFEST.in
+# -----------------------------------------------------------------------------
+_create_manifest() {
+    _write_once "${1:-.}/MANIFEST.in" << 'EOF'
+include README.md
+include LICENSE
+include requirements.txt
+include pyproject.toml
+recursive-include src *.py
+recursive-include config *
+recursive-exclude * __pycache__
+recursive-exclude * *.pyc
+EOF
+}
+
+# -----------------------------------------------------------------------------
+# Subcommand: package - Create package __init__.py
+# -----------------------------------------------------------------------------
+_create_package_init() {
+    local git_root="${1:-.}" project_name package_name
+    project_name=$(_default_name "$git_root" "${2:-}")
+    package_name="${project_name//-/_}"
+
+    local AUTHOR_NAME AUTHOR_EMAIL REPO_URL
+    _project_meta "$git_root" 2>/dev/null
+    _write_once "$git_root/src/$package_name/__init__.py" << EOF
+"""
+$package_name
+
+Part of $project_name.
+"""
+
+__version__ = "0.1.0"
+__author__ = "$AUTHOR_NAME"
+__email__ = "$AUTHOR_EMAIL"
+__license__ = "Proprietary"
+
+__all__ = ["__version__", "__author__", "__email__", "__license__"]
+EOF
+}
+
+# -----------------------------------------------------------------------------
+# Subcommand: all - Create all PyPI files
+# -----------------------------------------------------------------------------
+_create_all() {
+    local git_root="${1:-.}" project_name
+    project_name=$(_default_name "$git_root" "${2:-}")
+
+    info "Creating PyPI compliance files for: $project_name"
+
+    _create_pyproject_toml "$git_root" "$project_name"
+    _create_setup_py "$git_root"
+    _create_manifest "$git_root"
+    _create_package_init "$git_root" "$project_name"
+
+    info "PyPI compliance files created successfully"
+}
+
+# -----------------------------------------------------------------------------
+# Main: dispatch to a subcommand
+# -----------------------------------------------------------------------------
+pypi_setup_project() {
+    local command="${1:-}"
+    [[ -n "$command" ]] || { show_help; return 0; }
+    shift
+    case "$command" in
+        all)       _create_all "$@" ;;
+        pyproject) _create_pyproject_toml "$@" ;;
+        setup)     _create_setup_py "$@" ;;
+        manifest)  _create_manifest "$@" ;;
+        package)   _create_package_init "$@" ;;
+        *) err "Unknown command: $command (see -h)"; return 1 ;;
+    esac
+}
+
+pypi_setup_project "$@"

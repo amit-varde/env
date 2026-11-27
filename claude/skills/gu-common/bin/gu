@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# gu - command-line half of the gu-* skill kit. `gu help` lists commands.
+# Each command lives in ../cmd/<name>.sh, defines main(), and starts with a
+# "#: <usage> - <summary>" line that `gu help` prints.
+# No `set -u`: bash 3.2 treats "${empty_array[@]}" as unbound.
+src="$0"
+while [ -L "$src" ]; do                      # follow symlinks (env/bin/gu, ~/.claude)
+  t=$(readlink "$src"); case "$t" in /*) src="$t" ;; *) src="$(dirname "$src")/$t" ;; esac
+done
+GU_HOME="$(cd "$(dirname "$src")/.." && pwd)"
+. "$GU_HOME/lib.sh"
+
+cmd="${1:-help}"; [ $# -gt 0 ] && shift
+GU_ARGS=("$@")
+GU_CMDLINE="$cmd $*"
+if [ "$cmd" = help ] || [ "$cmd" = -h ] || [ "$cmd" = --help ]; then
+  echo "usage: gu <command> [args]   (repo = folder under \$WORK, a path, or omitted for the current repo)"
+  echo "Output is colored on a terminal (GU_COLOR=always|never, or NO_COLOR=1 to turn it off)."
+  echo "GU_STATUS=1 also prints git status for the repo(s) to stderr after the command."
+  for f in "$GU_HOME"/cmd/*.sh; do sed -n 's/^#: /  /p' "$f"; done
+  exit 0
+fi
+f="$GU_HOME/cmd/$cmd.sh"
+[ -f "$f" ] || die "unknown command '$cmd' (gu help)"
+. "$f"
+
+# GU_STATUS=1: end with git status for the repo(s) the command touched. Off by
+# default. Stderr, so the | rows on stdout stay parseable.
+gu_util_on_exit() {
+  local rc=$? top tmp work rel
+  trap - EXIT
+  if [ "${GU_STATUS:-}" != 1 ]; then exit "$rc"; fi
+  tmp=$(mktemp "${TMPDIR:-/tmp}/gu.XXXXXX") || exit "$rc"
+  gu_status_targets "$cmd" ${GU_ARGS[@]+"${GU_ARGS[@]}"} | awk 'NF && !seen[$0]++' >"$tmp" || true
+  work=$(cd "$GU_WORK" 2>/dev/null && pwd -P) || work=$GU_WORK
+  while IFS= read -r top; do
+    [ -n "$top" ] || continue
+    rel=${top#"$GU_WORK"/}; rel=${rel#"$work"/}
+    printf '\n== git status: %s ==\n' "$rel" >&2
+    git -C "$top" status >&2 || true
+  done <"$tmp"
+  rm -f "$tmp"
+  exit "$rc"
+}
+trap gu_util_on_exit EXIT
+# On a terminal, align the | tables and color the output (lib.sh: gu_color, pretty.awk).
+# Piped or captured (skills, scripts, tests), the output is the plain | rows.
+# The command's own stdout is the pipe, so tell it what it is really writing to.
+[ -t 1 ] && export GU_TTY=1
+if gu_color 1; then
+  export GU_COLOR=always
+  main "$@" | awk -v truecolor="$(gu_truecolor && echo 1)" -f "$GU_HOME/pretty.awk"
+  exit "${PIPESTATUS[0]}"
+fi
+main "$@"

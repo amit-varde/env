@@ -1,7 +1,16 @@
-# shared helpers (sourced)
+# shellcheck shell=bash
+# Shared helpers for scripts/ (sourced). See lib/scan-patterns.bash for the
+# secret/PII patterns and the blocklist - they are defined there and only there,
+# so the export scrubbers and bin/env-scan can never drift apart.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BLOCKLIST="$ROOT/.blocklist.local"; [ -f "$BLOCKLIST" ] || BLOCKLIST="$ROOT/blocklist.example"
-# regexes for secrets (extended, case-insensitive where noted by grep -i)
-SECRET_RE='(-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,}|eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.)'
-ASSIGN_RE='(key|token|secret|passw(or)?d|passwd|credential|auth|bearer)[A-Za-z0-9_]*[[:space:]]*[=:][[:space:]]*["'"'"']?[^[:space:]"'"'"'$(]{6,}'
-blocklist_pattern() { grep -v '^[[:space:]]*#' "$BLOCKLIST" | grep -v '^[[:space:]]*$' | paste -sd'|' -; }
+
+# The repo these scripts act on. blocklist_file / blocklist_pattern default to
+# it, so a stray $BU from the user's login shell cannot redirect them.
+SCAN_ROOT="$ROOT"
+
+# shellcheck source=../lib/scan-patterns.bash
+. "$ROOT/lib/scan-patterns.bash"
+
+# Path of the live blocklist, or empty when there is none. The export scrubbers
+# print this, so keep it defined even when absent.
+BLOCKLIST="$(blocklist_file "$ROOT")"

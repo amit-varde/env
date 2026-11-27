@@ -4,5 +4,5 @@
 set -u
 . "$(dirname "$0")/lib.sh"
 parse_dry "$@"
-need_macos
+mac_only "Install MacVim by hand (macOS only); on Linux use vim or gvim from your package manager."
 install_cask macvim-app "/Applications/MacVim.app" mvim

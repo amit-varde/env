@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/cursor-ide
+# =============================================================================
+#
+# DESCRIPTION: Open Cursor in IDE (editor) mode instead of Agents mode
+#   Cursor keeps its IDE/Agents layout in an app-level storage value,
+#   cursor/unifiedAppLayout ("editor" or "agent"), in its state database
+#   (state.vscdb). There is no settings.json key for it. This command reads
+#   that value and, if it is "agent", sets it to "editor" before launching
+#   Cursor, so Cursor starts in IDE mode.
+#
+#   Cursor owns the database while it runs and rewrites it on quit, so the
+#   value is only ever written while Cursor is NOT running. If Cursor is
+#   running in Agents mode, you are asked whether to quit it, fix the value
+#   and start it again (--restart answers yes). Without a terminal, or with
+#   --no-fix, Cursor is just opened as it is.
+#
+#   Before any write the database is backed up (state.vscdb.bak-<time>, the
+#   newest 3 are kept) and the new value is read back to check it.
+#
+#   This only covers launches that go through this command (alias: cursor).
+#   Starting Cursor from the Dock, Spotlight or Finder bypasses it. Cursor
+#   saves its mode when it quits, so once it is "editor" it stays that way
+#   until you switch to Agents mode again.
+#
+# ARGUMENTS:
+#   (anything else)   Passed to the real cursor command, e.g. a folder, a file,
+#                     a .code-workspace file, --new-window, --wait
+#
+# OPTIONS:
+#   --check      Print the current mode (editor, agent or unknown), launch
+#                nothing. Exit 1 if it is "agent"
+#   --dry-run    Show what would be done; change and launch nothing
+#   --no-fix     Never change the database; just launch Cursor
+#   --restart    If Cursor is running in Agents mode, quit it, fix the value
+#                and start it again, without asking
+#   --yes        Answer yes to the quit-and-restart question
+#   --agent      Switch to Agents mode instead of IDE mode, then launch
+#   --           Stop reading options; pass everything after it to Cursor
+#   -h, --help   Show this help
+#
+# ENVIRONMENT (for testing and unusual installs):
+#   CURSOR_STATE_DB       Path to state.vscdb (default: the per-OS location)
+#   CURSOR_CLI            Path to the real cursor command to launch
+#   CURSOR_IDE_RUNNING    1 or 0: skip detection and assume Cursor is / is not
+#                         running
+#
+# PREREQUISITES:
+#   - sqlite3 (macOS has it; Linux: apt/dnf install sqlite3)
+#   - Cursor installed (macOS app or the cursor command on PATH)
+#
+# EXIT CODES:
+#   0 - --check found "editor" or "unknown", or --dry-run finished
+#       (a normal run replaces itself with Cursor, so its exit code is Cursor's;
+#       a failed fix only prints a warning and Cursor is still launched)
+#   1 - --check found "agent"
+#   2 - sqlite3 or Cursor not found
+#
+# USAGE:
+#   cursor-ide                       # open Cursor (IDE mode)
+#   cursor-ide ~/work/env            # open a folder
+#   cursor-ide --check               # which mode will Cursor start in?
+#   cursor-ide --restart ~/work/rock # fix a running Cursor, then open
+#   cursor-ide -h | --help
+#
+# =============================================================================
+set -uo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+KEY="cursor/unifiedAppLayout"
+WANT="editor"
+KEEP_BACKUPS=3
+
+CHECK=0; DRY=0; NOFIX=0; RESTART=0; YES=0
+PASS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --check)   CHECK=1 ;;
+        --dry-run) DRY=1 ;;
+        --no-fix)  NOFIX=1 ;;
+        --restart) RESTART=1 ;;
+        --yes)     YES=1 ;;
+        --agent)   WANT="agent" ;;
+        --)        shift; PASS+=("$@"); break ;;
+        *)         PASS+=("$1") ;;
+    esac
+    shift
+done
+
+# ---- Locate things -----------------------------------------------------------
+OS="$(cursor_os)"
+DB="$(cursor_state_db)"
+
+command -v sqlite3 >/dev/null 2>&1 || { err "sqlite3 not found. Install it (macOS has it; Linux: apt/dnf install sqlite3)."; exit 2; }
+
+# Real cursor command: never this script, never an alias (aliases do not exist here).
+find_cli() { cursor_find_cli "${BASH_SOURCE[0]}"; }
+
+# ---- Database ----------------------------------------------------------------
+# Prints editor | agent | unknown (no database, locked, or no row: Cursor then uses its default).
+get_mode() {
+    local v
+    [ -f "$DB" ] || { echo unknown; return; }
+    v="$(sqlite3 -readonly -cmd '.timeout 3000' "$DB" "select value from ItemTable where key='$KEY';" 2>/dev/null)" \
+        || { echo unknown; return; }
+    case "$v" in editor|agent) echo "$v" ;; *) echo unknown ;; esac
+}
+
+running() { cursor_running; }
+
+backup_db() {
+    local bak
+    bak="$DB.bak-$(date +%Y%m%d-%H%M%S)"
+    sqlite3 "$DB" ".backup '$bak'" || return 1
+    info "Backed up $DB -> $bak"
+    # keep the newest $KEEP_BACKUPS
+    # shellcheck disable=SC2012
+    ls -1t "$DB".bak-* 2>/dev/null | tail -n +$((KEEP_BACKUPS + 1)) | while IFS= read -r old; do rm -f -- "$old"; done
+}
+
+set_editor() {
+    backup_db || { err "Could not back up $DB; not changing it."; return 1; }
+    sqlite3 -cmd '.timeout 3000' "$DB" \
+        "insert or replace into ItemTable(key, value) values('$KEY', '$WANT');" || { err "Could not write to $DB."; return 1; }
+    [ "$(get_mode)" = "$WANT" ] || { err "Read-back check failed: $KEY is not '$WANT'."; return 1; }
+    success "Set $KEY = $WANT"
+}
+
+quit_cursor() {
+    if [ "$OS" = mac ]; then osascript -e 'tell application "Cursor" to quit' >/dev/null 2>&1
+    else pkill -TERM -xi cursor >/dev/null 2>&1; fi
+    for _ in $(seq 1 40); do running || return 0; sleep 0.5; done
+    return 1
+}
+
+launch() {
+    local cli
+    if cli="$(find_cli)"; then
+        exec "$cli" ${PASS[@]+"${PASS[@]}"}
+    elif [ "$OS" = mac ] && { [ -d /Applications/Cursor.app ] || [ -d "$HOME/Applications/Cursor.app" ]; }; then
+        exec open -a Cursor ${PASS[@]+"${PASS[@]}"}
+    fi
+    err "Cursor not found: no cursor command on PATH and no Cursor.app."
+    exit 2
+}
+
+# ---- Main --------------------------------------------------------------------
+MODE="$(get_mode)"
+
+if [ "$CHECK" -eq 1 ]; then
+    echo "$MODE"
+    # editor is the goal of a plain run; --agent makes agent the goal. unknown is neither.
+    [ "$MODE" != "$WANT" ] && [ "$MODE" != unknown ] && exit 1
+    exit 0
+fi
+
+# A plain run fixes "agent". --agent fixes "editor", and a database that has no value yet.
+needs_fix=0
+if [ "$NOFIX" -eq 0 ]; then
+    if [ "$MODE" != "$WANT" ] && { [ "$MODE" = editor ] || [ "$MODE" = agent ] || { [ "$WANT" = agent ] && [ -f "$DB" ]; }; }; then
+        needs_fix=1
+    fi
+fi
+if [ "$WANT" = agent ]; then now="IDE"; goal="Agents"; else now="Agents"; goal="IDE"; fi
+
+fix_ok=1
+if [ "$needs_fix" -eq 1 ]; then
+    if [ "$DRY" -eq 1 ]; then
+        if running; then info "[dry-run] Cursor is running in $now mode: would ask to quit, set $KEY=$WANT, restart."
+        else info "[dry-run] Would back up $DB and set $KEY=$WANT."; fi
+    elif ! running; then
+        set_editor || fix_ok=0
+    else
+        warn "Cursor is running in $now mode. The value can only be changed while it is closed."
+        answer=0
+        if [ "$RESTART" -eq 1 ] || [ "$YES" -eq 1 ]; then answer=1
+        elif [ -t 0 ] && [ -t 1 ]; then
+            read -r -p "  Quit Cursor, switch to $goal mode and reopen it? [y/N] " a
+            case "$a" in [Yy]*) answer=1 ;; esac
+        fi
+        if [ "$answer" -eq 1 ]; then
+            info "Quitting Cursor..."
+            if quit_cursor; then set_editor || fix_ok=0
+            else warn "Cursor did not quit in 20 s; leaving the value alone."; fix_ok=0; fi
+        else
+            warn "Opening Cursor as it is ($now mode). Re-run with --restart to fix it."
+        fi
+    fi
+elif [ "$MODE" = unknown ] && [ ! -f "$DB" ]; then
+    debug "No Cursor state database at $DB (first run?): Cursor will use its default (editor)."
+fi
+
+if [ "$DRY" -eq 1 ]; then
+    cli="$(find_cli || true)"
+    info "[dry-run] Would launch: ${cli:-open -a Cursor} ${PASS[*]-}"
+    exit 0
+fi
+
+if [ "$fix_ok" -eq 0 ]; then warn "Could not switch to $goal mode; launching Cursor anyway."; fi
+launch

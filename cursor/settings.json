@@ -1,0 +1,13 @@
+{
+    "window.autoDetectColorScheme": false,
+    "cursor.composer.queueMessageDefaultBehavior": "steer",
+    "cursor.composer.queueManualSendBehavior2": "steer",
+    "cursor.composer.conversationDensity": "compact-ungrouped",
+    "cursor.composer.codeBlockWordWrap": true,
+    "remote.SSH.remotePlatform": {},
+    "files.autoSave": "afterDelay",
+    "workbench.externalBrowser": "default",
+    "workbench.editorAssociations": {
+        "*.md": "vscode.markdown.preview.editor"
+    }
+}

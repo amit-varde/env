@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/fu-open
+# =============================================================================
+#
+# DESCRIPTION: Open files with appropriate application by extension
+#   Opens files with the appropriate application based on file extension.
+#   Provides custom mappings for common development file types while falling
+#   back to system defaults for unrecognized types.
+#
+#   When called without arguments, searches current directory for .code-workspace
+#   files and opens the first one found in your editor ($EDITOR_APP).
+#
+# ARGUMENTS:
+#   file    One or more files to open (optional)
+#
+# FILE TYPE MAPPINGS:
+#   .code-workspace         Your editor: $EDITOR_APP (default Cursor.app, opened
+#                           through cursor-ide so it starts in IDE mode)
+#   .txt                    Sublime Text
+#   .md                     Markdown Editor
+#   *.alias, alias, .bashrc, .zshrc   Your editor ($EDITOR_APP)
+#   (other)                 System default application
+#
+# ENVIRONMENT:
+#   EDITOR_APP   macOS app for code files, e.g. "Cursor.app" (default) or
+#                "Visual Studio Code.app". Set in .env.host.
+#
+# PREREQUISITES:
+#   - macOS or Linux
+#   - Mapped applications installed (Cursor or your $EDITOR_APP, Sublime Text,
+#     Markdown Editor)
+#   - Linux: xdg-open available (standard on most Linux distributions)
+#
+# EXIT CODES:
+#   0 - Success
+#   1 - No workspace file found (when called without arguments)
+#
+# USAGE:
+#   fu-open <file> [file ...]
+#   fu-open                (searches for and opens .code-workspace)
+#   fu-open -h | --help
+#
+# EXAMPLES:
+#   # Open a workspace file in current directory
+#   fu-open
+#
+#   # Open specific files
+#   fu-open project.code-workspace README.md notes.txt
+#
+#   # Open all markdown files in directory
+#   fu-open *.md
+#
+#   # Open configuration file
+#   fu-open ~/.zshrc
+#
+# =============================================================================
+set -euo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+# Files that open in your editor ($EDITOR_APP)
+_is_code_file() {
+    case "$1" in
+        *.code-workspace|*.alias|alias|*/alias|.bashrc|*/.bashrc|.zshrc|*/.zshrc) return 0 ;;
+    esac
+    return 1
+}
+
+# App for any other file on macOS, by name/extension (empty = system default)
+_mac_app() {
+    case "$1" in
+        *.txt)   echo "Sublime Text.app" ;;
+        *.md)    echo "Markdown Editor.app" ;;
+    esac
+}
+
+_open_with_app() {
+    local file="$1" app
+    if _is_code_file "$file"; then
+        editor_open "$file" || { err "No editor or file opener found (set EDITOR_APP, or install xdg-open)"; return 1; }
+    elif [[ "$OSTYPE" == darwin* ]]; then
+        app=$(_mac_app "$file")
+        if [[ -n "$app" ]]; then open -a "$app" "$file"; else open "$file"; fi
+    elif command -v xdg-open &>/dev/null; then
+        xdg-open "$file"
+    else
+        err "No file opener found (tried 'open' for macOS, 'xdg-open' for Linux)"
+        return 1
+    fi
+}
+
+open_file() {
+    local file ws_file
+    if [[ $# -eq 0 ]]; then
+        ws_file=$(find . -maxdepth 1 -name "*.code-workspace" -print -quit 2>/dev/null)
+        if [[ -z "$ws_file" ]]; then
+            warn "No .code-workspace file found in $(pwd)"
+            return 1
+        fi
+        info "Opening workspace: $ws_file"
+        set -- "$ws_file"
+    fi
+    for file in "$@"; do _open_with_app "$file"; done
+}
+
+open_file "$@"

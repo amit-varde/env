@@ -1,0 +1,3 @@
+# Cursor extensions, one id per line. `cursor-sync apply` installs the missing ones;
+# `cursor-sync export` rewrites this list from what is installed.
+anysphere.remote-ssh

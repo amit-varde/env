@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/fname
+# =============================================================================
+#
+# DESCRIPTION: Print the full path of a file or folder, symlinks resolved
+#   Uses realpath; without it, resolves the path itself with the same output.
+#
+# ARGUMENTS:
+#   path       File or folder (default: the current folder)
+#
+# EXIT CODES:
+#   0 - Path printed
+#   1 - No such file, or a symlink loop
+#
+# USAGE:
+#   fname                # current folder
+#   fname bin/gu-update  # /Users/me/work/env/bin/gu-update
+#   fname -h | --help
+#
+# =============================================================================
+set -uo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+t="${1:-.}"
+if command -v realpath >/dev/null 2>&1; then exec realpath "$t"; fi
+[ -e "$t" ] || { echo "fname: $t: No such file or directory" >&2; exit 1; }
+n=0
+while [ ! -d "$t" ] && [ -L "$t" ]; do         # follow file symlinks hop by hop
+    [ $((n += 1)) -le 40 ] || { echo "fname: $1: Too many levels of symbolic links" >&2; exit 1; }
+    cd -P "$(dirname "$t")" || exit 1
+    t="$(readlink "$(basename "$t")")"
+done
+if [ -d "$t" ]; then cd -P "$t" && pwd -P; exit; fi
+cd -P "$(dirname "$t")" || exit 1
+d="$(pwd -P)"; echo "${d%/}/$(basename "$t")"

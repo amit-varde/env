@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/pypi-validate-project
+# =============================================================================
+#
+# DESCRIPTION: Validate PyPI compliance of a Python project
+#   Validates that a Python project has all required files for PyPI compliance.
+#   Checks for pyproject.toml, setup.py, LICENSE, README.md, MANIFEST.in, and
+#   package __init__.py. Also validates pyproject.toml syntax and Python version
+#   requirements.
+#
+# ARGUMENTS:
+#   git_root    Project root directory (default: current directory)
+#
+# VALIDATION CHECKS:
+#   ✓ pyproject.toml exists and is valid TOML
+#   ✓ setup.py exists
+#   ✓ LICENSE exists
+#   ✓ README.md exists
+#   ✓ MANIFEST.in exists
+#   ✓ src/<package>/__init__.py exists
+#   ✓ requires-python >= 3.10 set in pyproject.toml
+#
+# EXIT CODES:
+#   0 - All validations passed
+#   1 - One or more compliance issues found
+#
+# USAGE:
+#   pypi-validate-project
+#   pypi-validate-project /path/to/project
+#   pypi-validate-project -h | --help
+#
+# EXAMPLES:
+#   # Validate current directory
+#   pypi-validate-project
+#
+#   # Validate specific project
+#   pypi-validate-project ~/work/my-project
+#
+#   # Use in CI/CD
+#   pypi-validate-project || exit 1
+#
+# =============================================================================
+set -euo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+pypi_validate_project() {
+    local git_root="${1:-.}" errors=0 file
+
+    info "Validating PyPI compliance for: $git_root"
+
+    for file in pyproject.toml setup.py LICENSE README.md MANIFEST.in; do
+        if [[ -f "$git_root/$file" ]]; then
+            info "✓ Found: $file"
+        else
+            err "Missing required file: $file"
+            errors=$((errors + 1))
+        fi
+    done
+
+    if find "$git_root/src" -name "__init__.py" -type f 2>/dev/null | grep -q .; then
+        info "✓ Found package __init__.py"
+    else
+        err "Missing package __init__.py in src/"
+        errors=$((errors + 1))
+    fi
+
+    if [[ -f "$git_root/pyproject.toml" ]]; then
+        # tomllib (3.11+), else tomli (3.10); skip the syntax check if neither exists.
+        local toml_check='import sys
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        sys.exit(0)
+with open(sys.argv[1], "rb") as f:
+    tomllib.load(f)'
+        if python3 -c "$toml_check" "$git_root/pyproject.toml" 2>/dev/null; then
+            info "✓ pyproject.toml is valid"
+        else
+            err "pyproject.toml has syntax errors"
+            errors=$((errors + 1))
+        fi
+    fi
+
+    if grep -q "requires-python.*>=3.10" "$git_root/pyproject.toml" 2>/dev/null; then
+        info "✓ Python >=3.10 requirement set"
+    else
+        err "Python requirement not set to >=3.10 (PyPI compliance requires it)"
+        errors=$((errors + 1))
+    fi
+
+    if [[ $errors -eq 0 ]]; then
+        info "✓ PyPI compliance validation passed!"
+        return 0
+    fi
+    err "$errors compliance issues found"
+    return 1
+}
+
+pypi_validate_project "$@"
