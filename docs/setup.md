@@ -138,6 +138,12 @@ first.
   `lib/common.bash`, and its built-in `ENV_REPO` must match `env.conf`
 - `tests/test-setup-env-tools.sh` — the tool manifest, the change log,
   `env-toolcheck.sh` and `--tools`, in a throwaway `HOME`
+- `tests/test-alias.sh` — every function the `alias` file defines is cleared of
+  any same-named alias first, and the whole file still loads under `zsh` and
+  `bash` when those names are already aliased. zsh expands aliases at *parse*
+  time, so without that an alias you already have turns a function definition
+  into a parse error that aborts the rest of the file and silently costs you
+  every alias below it
 - `tests/test-gu-worktree.sh` — `gu worktree` add/list/remove/prune and the lock
   hook in linked worktrees, against a throwaway repo
 - `tests/test-gu-fork.sh` — `gu fork` wire, status, pull, land, send and take

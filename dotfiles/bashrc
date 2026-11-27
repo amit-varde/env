@@ -20,7 +20,7 @@ export NVM_DIR="$HOME/.nvm"
 PS1='\u@\h \W \$ '
 export WORK="$HOME/work"
 alias ll='ls -lah'
-alias so='source ~/.bashrc'
+# 'so' is a shell-aware function in the repo's alias file, sourced via env.sh.
 
 [ -f "$HOME/.alias" ] && . "$HOME/.alias"
 [ -f "$HOME/.bashrc.local" ] && . "$HOME/.bashrc.local"
