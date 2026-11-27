@@ -113,6 +113,12 @@ jobs:
       - name: tool manifest and change log
         run: ./tests/test-setup-env-tools.sh
 
+      # The alias file defines shell functions. zsh expands aliases at parse
+      # time, so a pre-existing alias of one of those names aborts the rest of
+      # the file. This proves the guard holds and that no rc template collides.
+      - name: alias file survives a hostile pre-existing alias
+        run: ./tests/test-alias.sh
+
       - name: gu worktree and the lock hook
         run: ./tests/test-gu-worktree.sh
 

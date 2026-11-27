@@ -32,7 +32,7 @@ PS1="%n@%m %1~ %# "
 export WORK="$HOME/work"
 export DOCS="$HOME/Documents"
 alias ll='ls -lah'
-alias so='source ~/.zshrc'
+# 'so' is a shell-aware function in the repo's alias file, sourced via env.sh.
 
 # --- optional integrations ---
 [ -f "$HOME/.iterm2_shell_integration.zsh" ] && source "$HOME/.iterm2_shell_integration.zsh"

@@ -20,6 +20,18 @@ alias cleanup='find . -name "*.DS_Store" -type f -delete'              # Remove 
 alias bckup='f(){ out="backup-$1-$(date +%Y-%m-%d-%H-%M-%S).tar.gz"; shift; tar -czf "$out" "$@"; }; f'  # Create timestamped backup
 alias pbps='pbpaste'                                                   # Paste from clipboard
 
+# -----------------------------------------------------------------------------
+# Every FUNCTION this file defines must be named below. zsh expands aliases at
+# PARSE time, so if an alias of the same name already exists -- from your
+# ~/.zshrc.local, an old ~/.alias, or anything else -- then "name() {" does not
+# merely warn. It is a parse error that ABORTS THE REST OF THIS FILE, silently
+# costing you every alias defined below the failure. Clearing the alias first
+# makes this file immune to whatever a machine already has.
+# tests/test-alias.sh fails the build if a function here is missing from this
+# list, so adding a function without guarding it cannot slip through.
+# -----------------------------------------------------------------------------
+unalias so env-install pydev-install 2>/dev/null || true
+
 # Reload shell config (detects current shell and sources appropriate config file)
 so() {
   case "$SHELL" in
