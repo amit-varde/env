@@ -6,6 +6,14 @@
 
 `env.sh` sources `lib/common.bash` first. Every `lib/init-*.bash` file then loads automatically.
 
+While it loads, `env.sh` switches alias expansion off (`unsetopt aliases` in
+zsh, `shopt -u expand_aliases` in bash) and restores it afterwards. Both shells
+expand aliases at *parse* time, so an alias you already have whose name matches
+one of the 64 functions this chain defines — `info`, `ok`, `step` and `backup`
+among them — would otherwise turn that function's definition into a parse error
+that silently discards the rest of the file. Your own aliases are left alone;
+only expansion is paused, and only until the last line of `env.sh`.
+
 | Function / variable | Module | Description |
 |---|---|---|
 | `go_project <name> [0\|1]` | `init-go-projects` | `cd` to `$WORK/<name>`, set `PROJECT_NAME`, update the prompt, open its workspace in your editor (`$EDITOR_APP`, default Cursor via `cursor-ide`; `0` = don't) |
@@ -15,7 +23,7 @@
 | `show_help` `handle_help` `file_mode` `editor_open` | `common` | Help text for `bin/` and `tools/install.sh` (header comments), file modes, and opening a path in `$EDITOR_APP` |
 | `path_prepend VAR DIR` | `env.sh` | Put `DIR` at the front of a colon list such as `PATH`, once |
 | `EDITOR`, `LANG` | `init-editor` | Editor and locale defaults |
-| — | `init-paths`, `init-pyenv`, `init-nvm`, `init-iterm2` | `PATH`/`MANPATH`, pyenv, nvm and iTerm2 integration, if installed |
+| — | `init-paths`, `init-pyenv`, `init-nvm`, `init-iterm2` | `PATH`/`MANPATH`, pyenv, nvm and iTerm2 integration if installed. The two that ship one file per shell are loaded per shell: iTerm2's `~/.iterm2_shell_integration.zsh` under zsh and `.bash` under bash, and nvm's `bash_completion` under bash only (`nvm.sh` itself loads in both). For nvm completion under zsh, run `autoload -U +X bashcompinit && bashcompinit` in `~/.zshrc.local` before `env.sh` and source the file yourself |
 
 ## Install helpers (`tools/` + `alias`)
 

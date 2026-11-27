@@ -96,10 +96,14 @@ jobs:
       - uses: actions/checkout@v4
 
       # test-bootstrap.sh drives bootstrap.sh's prompts through a pseudo-terminal.
-      # macOS runners already ship expect.
-      - name: Install expect
+      # macOS runners already ship expect, and zsh is its default shell.
+      # zsh is NOT assumed present on the Linux runner: the shell tests skip
+      # their zsh half when it is missing, and a silently skipped half is
+      # exactly the kind of gap these tests exist to close. They fail instead
+      # of skipping when CI is set, so this install is load-bearing.
+      - name: Install expect and zsh
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y expect
+        run: sudo apt-get update && sudo apt-get install -y expect zsh
 
       # bootstrap.sh carries its own copies of the helpers in lib/common.bash and
       # its own ENV_REPO default, because it runs before any clone exists. This
@@ -118,6 +122,13 @@ jobs:
       # the file. This proves the guard holds and that no rc template collides.
       - name: alias file survives a hostile pre-existing alias
         run: ./tests/test-alias.sh
+
+      # env.sh runs on every login. Nothing used to prove it loads at all, so a
+      # fault in it reached a machine as two lines of warning and a half-built
+      # environment. This loads the whole chain under zsh and bash, hostile
+      # aliases included, and parses every file in it with both shells.
+      - name: env.sh and the init modules load in both shells
+        run: ./tests/test-env-load.sh
 
       - name: gu worktree and the lock hook
         run: ./tests/test-gu-worktree.sh
