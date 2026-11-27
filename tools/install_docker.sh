@@ -4,5 +4,5 @@
 set -u
 . "$(dirname "$0")/lib.sh"
 parse_dry "$@"
-need_macos
+mac_only "Install Docker Engine for your distro: https://docs.docker.com/engine/install/ (needs root)."
 install_cask docker-desktop "/Applications/Docker.app" docker

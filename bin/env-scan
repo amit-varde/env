@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/env-scan
+# =============================================================================
+#
+# DESCRIPTION: Scan the repo for secrets before you commit or share it
+#   Looks at every file git would commit (tracked, plus new files that are not
+#   git-ignored) for:
+#     secret     private-key blocks and well-known token formats (AWS, GitHub,
+#                Slack, Google, JWT, sk-...)
+#     assign     key/token/secret/password assignments with a literal value
+#     abs-path   absolute home paths such as /Users/name or /home/name
+#     email      email addresses
+#     blocklist  your own terms, one case-insensitive regex per line in
+#                .blocklist.local (git-ignored; start from blocklist.example)
+#   The matching text is never printed, only the file and line.
+#
+#   A line is skipped when it contains "env-scan:ignore". ssh/config.d/*.conf
+#   and the blocklist files are not scanned. Binary files are skipped.
+#
+#   Adapted from github.com/amit-varde/env-kit (scripts/scan.sh).
+#
+# OPTIONS:
+#   --staged         Scan only what is staged (use in a pre-commit hook)
+#   --skip CATEGORY  Do not report this category (repeatable)
+#   --only CATEGORY  Report only this category (repeatable)
+#   -q, --quiet      Print findings only, no summary lines when clean
+#   -h, --help       Show this help
+#
+# ENVIRONMENT:
+#   BU   The repo to scan (set by env.sh; defaults to this script's repo)
+#
+# EXIT CODES:
+#   0 - Clean
+#   1 - Findings
+#   2 - Bad usage
+#
+# USAGE:
+#   env-scan                         # everything git would commit
+#   env-scan --staged                # pre-commit gate
+#   env-scan --skip abs-path --skip email
+#   env-scan --only secret
+#   env-scan -h | --help
+#
+# PRE-COMMIT HOOK:
+#   printf '#!/bin/sh\nexec env-scan --staged\n' > .git/hooks/pre-commit
+#   chmod +x .git/hooks/pre-commit
+#
+# =============================================================================
+set -uo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+CATS_ALL="secret assign abs-path email blocklist"
+SKIP=""; ONLY=""; STAGED=0; QUIET=0
+valid_cat() { case " $CATS_ALL " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --staged) STAGED=1 ;;
+        --skip|--only)
+            [ $# -ge 2 ] || { err "$1 needs a category (one of: $CATS_ALL)"; exit 2; }
+            valid_cat "$2" || { err "Unknown category: $2 (one of: $CATS_ALL)"; exit 2; }
+            if [ "$1" = "--skip" ]; then SKIP="$SKIP $2"; else ONLY="$ONLY $2"; fi
+            shift ;;
+        -q|--quiet) QUIET=1 ;;
+        *) err "Unknown option: $1"; exit 2 ;;
+    esac
+    shift
+done
+want() { # category -> 0 when it should be reported
+    case " $SKIP " in *" $1 "*) return 1 ;; esac
+    [ -z "$ONLY" ] && return 0
+    case " $ONLY " in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
+
+# Patterns and the blocklist live in one place; see lib/scan-patterns.bash.
+# shellcheck source=../lib/scan-patterns.bash
+SCAN_ROOT="$BU"
+source "$BU/lib/scan-patterns.bash"
+BLOCKLIST="$(blocklist_file)"
+BL="$(blocklist_pattern)"
+
+cd "$BU" || { err "Cannot enter $BU"; exit 2; }
+# The files to look at: what git would commit, else everything.
+if git rev-parse --git-dir >/dev/null 2>&1; then
+    if [ "$STAGED" -eq 1 ]; then FILES="$(git diff --cached --name-only --diff-filter=ACMR)"
+    else FILES="$(git ls-files -co --exclude-standard)"; fi
+else
+    [ "$STAGED" -eq 0 ] || { err "--staged needs a git repository"; exit 2; }
+    FILES="$(find . -type f -not -path './.git/*' | sed 's#^\./##')"
+fi
+
+NFILES=0; NFIND=0
+hit() { # category file line
+    want "$1" || return 0
+    NFIND=$((NFIND + 1))
+    printf '  [%s] %s:%s\n' "$1" "$2" "$3"
+}
+# scan FILE CATEGORY REGEX [-i] [OK_REGEX]: report file:line of every matching line not
+# marked env-scan:ignore. A line whose matches all fit OK_REGEX (placeholders) is fine.
+# The matching text is never printed: it may be the secret itself.
+scan_re() {
+    local f="$1" cat="$2" re="$3" ci="${4:-}" ok="${5:-}" n text
+    want "$cat" || return 0
+    while IFS= read -r line; do
+        n="${line%%:*}"; text="${line#*:}"
+        case "$text" in *env-scan:ignore*) continue ;; esac
+        # Comments that only show an example value are not assignments.
+        if [ "$cat" = assign ]; then
+            case "$text" in [[:space:]]*"#"*|"#"*) continue ;; esac
+            echo "$text" | grep -qEi 'name|YOUR_|placeholder|example' && continue
+        fi
+        if [ -n "$ok" ]; then
+            printf '%s\n' "$text" | grep -oE ${ci:+-i} -e "$re" | grep -qvE -e "$ok" || continue
+        fi
+        hit "$cat" "$f" "$n"
+    done < <(grep -InE ${ci:+-i} -e "$re" -- "$f" 2>/dev/null)
+}
+
+while IFS= read -r f; do
+    [ -n "$f" ] && [ -f "$f" ] || continue
+    case "$f" in
+        ssh/config.d/*.conf|.blocklist.local|blocklist.example|bin/env-scan|lib/scan-patterns.bash|scripts/lib.sh) continue ;;
+    esac
+    grep -Iq . "$f" 2>/dev/null || continue            # binary or empty
+    NFILES=$((NFILES + 1))
+    # A public-key comment is a label (often user@host), not an account email.
+    pubkey=0
+    head -n 1 "$f" | grep -qE '^(ssh-(ed25519|rsa)|ecdsa-sha2-|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-)[[:space:]]' && pubkey=1
+    scan_re "$f" secret "$SECRET_RE"
+    scan_re "$f" assign "$ASSIGN_STRICT_RE" -i
+    scan_re "$f" abs-path "$PATH_RE" "" "$PATH_OK_RE"
+    if [ "$pubkey" -eq 0 ]; then
+        scan_re "$f" email "$EMAIL_RE" "" "$EMAIL_OK_RE"
+        [ -z "$BL" ] || scan_re "$f" blocklist "$BL" -i
+    fi
+done <<< "$FILES"
+
+if [ "$NFIND" -eq 0 ]; then
+    [ "$QUIET" -eq 1 ] || echo "env-scan: clean ($NFILES files$([ -n "$BL" ] || echo ', no .blocklist.local so no blocklist check'))"
+    exit 0
+fi
+echo "env-scan: $NFIND finding(s) in $NFILES files. Fix them, or add 'env-scan:ignore' to a line that is a false positive."
+exit 1

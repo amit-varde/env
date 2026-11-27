@@ -3,5 +3,5 @@
 set -u
 . "$(dirname "$0")/lib.sh"
 parse_dry "$@"
-need_macos
+mac_only "Download VS Code from https://code.visualstudio.com/Download or use your package manager."
 install_cask visual-studio-code "/Applications/Visual Studio Code.app" code

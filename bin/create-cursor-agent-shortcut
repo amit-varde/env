@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/create-cursor-agent-shortcut
+# =============================================================================
+#
+# DESCRIPTION: Desktop app that opens a workspace in Cursor's Agents mode (macOS)
+#   Writes <Desktop>/<name>-agent.app. Double-clicking it runs
+#   `cursor-ide --agent --yes` on that directory, so Cursor opens in Agents
+#   mode. The "-agent" suffix keeps it beside the IDE app for the same
+#   directory (env.app and env-agent.app). --name replaces the whole name.
+#   Its icon is cursor/icons/agent.jpg.
+#
+#   An app that is already there is replaced. Nothing is asked.
+#
+#   With no --dir it lists the directories directly under $WORK and asks which
+#   ones to create (Enter means all). -y answers all. With no terminal, pass
+#   --dir or -y.
+#
+# OPTIONS:
+#   --dir PATH      Workspace directory (repeatable). ~ and relative paths work
+#   --name NAME     App name, without .app. Only with a single --dir
+#   --desktop DIR   Where to write the apps (default: ~/Desktop)
+#   --work DIR      Where the interactive list looks (default: $WORK)
+#   -y, --yes       With no --dir: create one app per directory, no question
+#   -h, --help      Show this help
+#
+# EXIT CODES:
+#   0 - Apps written (or nothing chosen)
+#   1 - Not macOS, no Desktop, a path is not a directory, or a write failed
+#   2 - Bad option, or no --dir and no terminal to ask
+#
+# USAGE:
+#   create-cursor-agent-shortcut
+#   create-cursor-agent-shortcut -y
+#   create-cursor-agent-shortcut --dir ~/work/env
+#   create-cursor-agent-shortcut -h | --help
+#
+# =============================================================================
+set -uo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+CURSOR_SHORTCUT_MODE=agent
+CURSOR_SHORTCUT_SUFFIX=-agent
+CURSOR_SHORTCUT_ARGS=--agent
+source "$BU/lib/cursor-shortcut.bash"

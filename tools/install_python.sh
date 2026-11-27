@@ -8,7 +8,6 @@
 set -u
 . "$(dirname "$0")/lib.sh"
 parse_dry "$@"
-need_macos
 
 DEFAULT_VERSIONS="3.10.16 3.11.8 3.13.11"
 GLOBAL_DEFAULT="3.11.8"

@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/run-cmd
+# =============================================================================
+#
+# DESCRIPTION: Run shell command with output capture to log file
+#   Executes any shell command and captures both stdout and stderr to a log
+#   file while displaying output in the terminal. Generic wrapper for running
+#   commands with automatic output logging.
+#
+# ARGUMENTS:
+#   command    Command to execute
+#   args...    Arguments passed to the command
+#
+# ENVIRONMENT VARIABLES:
+#   RUN_OUT            Output file path (default: $PROJECT_WORKSPACE/$USER.run.out)
+#   PROJECT_WORKSPACE  Base directory for output files (optional)
+#
+# EXIT CODES:
+#   0 - Command executed successfully
+#   1 - No command specified
+#   * - Exit code from the executed command
+#
+# USAGE:
+#   run-cmd <command> [args...]
+#   run-cmd -h | --help
+#
+# EXAMPLES:
+#   # Run a build command
+#   run-cmd npm run build
+#
+#   # Run with complex arguments
+#   run-cmd docker build -t myimage:latest .
+#
+#   # Capture curl output
+#   run-cmd curl -s https://api.example.com/health
+#
+#   # Review output after command
+#   run-cmd ./deploy.sh && cat $RUN_OUT
+#
+# =============================================================================
+set -euo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+run_cmd() {
+    if [[ $# -eq 0 ]]; then show_help; return 1; fi
+
+    : "${RUN_OUT:=${PROJECT_WORKSPACE:-/tmp}/${USER:-user}.run.out}"
+    export RUN_OUT
+
+    info "Running command: $*"
+    # Disable -e around the pipeline so PIPESTATUS is read even on failure.
+    set +e
+    "$@" 2>&1 | tee "$RUN_OUT"
+    local exit_status=${PIPESTATUS[0]}
+    set -e
+
+    if [[ $exit_status -eq 0 ]]; then
+        info "SUCCESS: Command executed successfully. Output saved to '$RUN_OUT'."
+    else
+        err "Command failed with exit code $exit_status. Check '$RUN_OUT' for details."
+    fi
+    return $exit_status
+}
+
+run_cmd "$@"

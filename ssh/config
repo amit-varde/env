@@ -1,20 +1,40 @@
-StrictHostKeyChecking no
-UserKnownHostsFile /dev/null
-ForwardAgent yes
-ServerAliveInterval 60
-ServerAliveCountMax 3
-ControlMaster auto
-ControlPersist 10m
-ForwardX11 yes
-LocalForward 5901 localhost:5901
-StrictHostKeyChecking accept-new
-LogLevel ERROR
+# -----------------------------------------------------------------------------
+# File: env/ssh/config
+# Linked from: ~/.ssh/config  ->  <env>/ssh/config        (setup-env.sh, /env-ssh)
+#         and: ~/.ssh/config.d -> <env>/ssh/config.d
+#
+# This file is an index. Every file ssh reads is listed below by name, in the
+# order ssh reads it; nothing is picked up by wildcard. A new file in config.d/
+# does nothing until you add an Include line for it here.
+#
+# How ssh reads this: for each option, the FIRST value found wins. So the order
+# is: your local settings -> one file per host -> Host * defaults.
+#
+# Relative Include paths are resolved from ~/.ssh, so "config.d/x.conf" means
+# ~/.ssh/config.d/x.conf, which is the repo's ssh/config.d/x.conf through the
+# link above. A listed file that does not exist is silently skipped.
+# -----------------------------------------------------------------------------
 
-Include ~/.ssh/config.d/*.conf
+# --- 1. Your own settings (git-ignored, machine-local) ------------------------
+# User and IdentityFile per host. Written by setup-env.sh or `/env-ssh user`.
+Include config.d/local.conf
 
-Host 127.0.0.1 localhost *.local
-    StrictHostKeyChecking no
-    UserKnownHostsFile /dev/null
+# --- 2. Hosts: one file per host ----------------------------------------------
+# hosts.conf is produced by decrypting config.d/hosts.conf.gpg (setup-env.sh's
+# ssh step, or scripts/install.sh). The plaintext is git-ignored; the .gpg file
+# is what this repo publishes. See docs/privacy.md.
+Include config.d/hosts.conf
 
+# Add a host: copy config.d/host.conf.template to config.d/<alias>.conf, edit
+# it, and add "Include config.d/<alias>.conf" with a one-line description here.
+# Plaintext config.d/*.conf is git-ignored. To publish a host, encrypt it with
+# scripts/export-ssh-config.sh and commit the resulting .conf.gpg.
+
+# --- 3. Defaults for every host (only where nothing above set a value) --------
 Host *
-  IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+    AddKeysToAgent yes
+    # UseKeychain is macOS-only; IgnoreUnknown keeps Linux ssh from erroring.
+    IgnoreUnknown UseKeychain
+    UseKeychain yes
+    # Uncomment to take keys from the 1Password SSH agent instead of ~/.ssh.
+    # IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"

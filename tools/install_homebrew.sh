@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Install Homebrew. Needs Xcode Command Line Tools and may prompt for a password.
+# Install Homebrew (macOS). Needs Xcode Command Line Tools and may prompt for a password.
 # Safe to re-run. https://brew.sh
 set -u
 . "$(dirname "$0")/lib.sh"
 parse_dry "$@"
-need_macos
+mac_only "Linux uses the system package manager (apt/dnf/yum/pacman); Homebrew is not used."
 
 if command -v brew >/dev/null 2>&1 || [ -x /opt/homebrew/bin/brew ] || [ -x /usr/local/bin/brew ]; then
   ensure_brew || exit 1

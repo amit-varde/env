@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/fu-dos2unix   (fu-unix2dos is an alias: fu-dos2unix --to-dos)
+# =============================================================================
+#
+# DESCRIPTION: Convert line endings in place
+#   fu-dos2unix           CRLF (\r\n) -> LF (\n)
+#   fu-dos2unix --to-dos  LF -> CRLF (alias: fu-unix2dos). Lines that already
+#                         end in CRLF are left as they are, so running it
+#                         twice never produces \r\r\n.
+#   Each file is rewritten through a temp file in the same directory (atomic
+#   mv) and keeps its permissions.
+#
+# USAGE:
+#   fu-dos2unix <file> [file ...]
+#   fu-dos2unix --to-dos <file> [file ...]   (or fu-unix2dos <file> ...)
+#   fu-dos2unix -h | --help
+#
+# EXAMPLES:
+#   fu-dos2unix script.sh
+#   fu-dos2unix --to-dos deploy.bat
+#   fu-dos2unix *.txt
+#
+# EXIT CODES:
+#   0 - Every file converted
+#   1 - No file given, a file not found, or a conversion failed
+#
+# =============================================================================
+set -euo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+# convert_file <file> <to: unix|dos>
+convert_file() {
+    local file="$1" to="$2" tmp_file mode
+    [[ -f "$file" ]] || { err "File not found: $file"; return 1; }
+
+    tmp_file=$(mktemp "${file}.XXXXXX")
+    mode=$(file_mode "$file")
+    if awk -v dos="$([[ $to == dos ]] && echo 1)" \
+            'BEGIN { if (dos) ORS = "\r\n" } { sub(/\r$/, ""); print }' "$file" > "$tmp_file" \
+        && chmod "$mode" "$tmp_file" \
+        && mv "$tmp_file" "$file"; then
+        info "Converted $file to $to line endings."
+    else
+        rm -f "$tmp_file"
+        err "Failed to convert $file."
+        return 1
+    fi
+}
+
+main() {
+    local to=unix rc=0 file
+    case "${1:-}" in --to-dos) to=dos; shift ;; --to-unix) shift ;; esac
+    [[ $# -gt 0 ]] || { err "No file specified."; show_help; return 1; }
+    for file in "$@"; do convert_file "$file" "$to" || rc=1; done
+    return $rc
+}
+
+main "$@"

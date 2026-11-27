@@ -4,7 +4,7 @@
 set -u
 . "$(dirname "$0")/lib.sh"
 parse_dry "$@"
-need_macos
+mac_only "iTerm2 is a macOS app."
 install_cask iterm2 "/Applications/iTerm.app" || exit $?
 
 dest="$HOME/.iterm2_shell_integration.zsh"

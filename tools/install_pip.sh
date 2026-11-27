@@ -4,7 +4,6 @@
 set -u
 . "$(dirname "$0")/lib.sh"
 parse_dry "$@"
-need_macos
 
 ensure_pyenv 2>/dev/null || true
 

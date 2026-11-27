@@ -7,16 +7,22 @@ OUT="$ROOT/_review/dotfiles"; mkdir -p "$OUT"; BL="$(blocklist_pattern)"
 for src in "$@"; do
   [ -f "$src" ] || { echo "skip (not found): $src"; continue; }
   name="$(basename "$src" | sed 's/^\.//')"; dst="$OUT/$name"; rm_log="$OUT/$name.removed.txt"; : > "$rm_log"
-  n=0
+  n=0; ln=0
   while IFS= read -r line || [ -n "$line" ]; do
-    drop=""
+    ln=$((ln+1)); drop=""
     echo "$line" | grep -qE "$SECRET_RE" && drop="secret-pattern"
     [ -z "$drop" ] && echo "$line" | grep -Ei "^[[:space:]]*(export|setenv|set)?[[:space:]]*[A-Za-z0-9_]*(key|token|secret|passw|credential|auth)[A-Za-z0-9_]*[[:space:]=]" | grep -qvE '^[[:space:]]*#' && drop="secret-assignment"
     [ -z "$drop" ] && [ -n "$BL" ] && echo "$line" | grep -qEi "$BL" && drop="blocklist"
     [ -z "$drop" ] && echo "$line" | grep -qE '(ssh|scp|rsync)[^#]*@|[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' && drop="host-or-ip"
-    if [ -n "$drop" ]; then n=$((n+1)); echo "[$drop] $(echo "$line" | cut -c1-30)..." >> "$rm_log"; echo "# [removed: $drop]" >> "$dst.tmp"
+    if [ -n "$drop" ]; then
+      n=$((n+1))
+      # Log the line NUMBER and the reason only. Never any of the line itself:
+      # cutting the first N characters of "export API_TOKEN=secret" still logs
+      # the secret, and this file lands on disk next to the scrubbed copy.
+      echo "line $ln: [$drop]" >> "$rm_log"
+      echo "# [removed: $drop]" >> "$dst.tmp"
     else echo "$line" | sed -E "s#$HOME#\$HOME#g; s#/Users/[A-Za-z0-9._-]+#\$HOME#g; s#/home/[A-Za-z0-9._-]+#\$HOME#g" >> "$dst.tmp"; fi
   done < "$src"
-  mv "$dst.tmp" "$dst"; echo "$src -> _review/dotfiles/$name  ($n line(s) removed; reasons in $name.removed.txt, values not logged)"
+  mv "$dst.tmp" "$dst"; echo "$src -> _review/dotfiles/$name  ($n line(s) removed; line numbers and reasons in $name.removed.txt, never the text)"
 done
 echo "NEXT: read each file in _review/dotfiles/, move keepers into dotfiles/, move employer bits to ~/.zshrc.local, then run scripts/scan.sh"

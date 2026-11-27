@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/pydev
+# =============================================================================
+#
+# DESCRIPTION: Display Python environment info (pyenv, pip, venv)
+#   Displays comprehensive Python environment information including pyenv
+#   version, Python executable path and version, pip executable path and
+#   version, and virtual environment status. Useful for debugging Python
+#   environment issues or verifying setup.
+#
+# ENVIRONMENT VARIABLES CHECKED:
+#   VIRTUAL_ENV    Path to currently activated virtual environment
+#
+# OUTPUT:
+#   - Pyenv version or "not installed"
+#   - Python executable path and version
+#   - Pip executable path and version
+#   - Virtual environment path (if active)
+#
+# EXIT CODES:
+#   0 - Always succeeds (missing tools shown as "not found")
+#
+# USAGE:
+#   pydev
+#   pydev -h | --help
+#
+# EXAMPLES:
+#   # Check Python environment
+#   pydev
+#   # Output:
+#   # Info: Pyenv version: pyenv 2.3.17
+#   # Info: Python executable: /usr/local/bin/python
+#   # Info: Python version: Python 3.11.4
+#   # Info: Pip executable: /usr/local/bin/pip
+#   # Info: Pip version: pip 23.2.1
+#   # Info: No virtual environment is currently activated.
+#
+#   # Check after activating venv
+#   source venv/bin/activate && pydev
+#
+# =============================================================================
+set -euo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+dev_py_info() {
+    info "Pyenv version: $(pyenv --version 2>&1 || echo "pyenv not installed")"
+    info "Python executable: $(command -v python || echo "not found")"
+    info "Python version: $(python --version 2>&1 || echo "not available")"
+    info "Pip executable: $(command -v pip || echo "not found")"
+    info "Pip version: $(pip --version 2>&1 || echo "not available")"
+    if [[ -n "${VIRTUAL_ENV:-}" ]]; then
+        info "Current virtual environment: $VIRTUAL_ENV"
+    else
+        info "No virtual environment is currently activated."
+    fi
+}
+
+dev_py_info "$@"

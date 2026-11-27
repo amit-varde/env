@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# gu - puts the gu-* skill kit's command on PATH (the real one lives in
+# claude/skills/gu-common/bin/gu). A wrapper, not an alias, so it also
+# works from scripts and Claude Code's `!` commands, where aliases don't load.
+exec bash "$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)/claude/skills/gu-common/bin/gu" "$@"

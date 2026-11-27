@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# File: env/alias
+# Description: Aliases for BU utilities and project navigation
+# -----------------------------------------------------------------------------
+# This file is sourced by env.sh to provide short aliases for common commands
+# -----------------------------------------------------------------------------
+
+alias up='cd ..'                                                       # Go up one directory
+
+# =============================================================================
+# SYSTEM UTILITIES - Terminal and system settings
+# =============================================================================
+alias c='clear'                                                        # Clear the terminal screen
+alias cls='clear'                                                      # Clear the terminal screen (alternative)
+alias x='exit'                                                         # Exit the terminal
+alias showfiles='defaults write com.apple.finder AppleShowAllFiles YES; killall Finder'  # Show hidden files in Finder
+alias hidefiles='defaults write com.apple.finder AppleShowAllFiles NO; killall Finder'   # Hide hidden files in Finder
+alias cleanup='find . -name "*.DS_Store" -type f -delete'              # Remove .DS_Store files
+alias bckup='f(){ out="backup-$1-$(date +%Y-%m-%d-%H-%M-%S).tar.gz"; shift; tar -czf "$out" "$@"; }; f'  # Create timestamped backup
+alias pbps='pbpaste'                                                   # Paste from clipboard
+
+# Reload shell config (detects current shell and sources appropriate config file)
+so() {
+  case "$SHELL" in
+    */zsh)   source ~/.zshrc ;;
+    */bash)  source ~/.bashrc ;;
+    */csh)   source ~/.cshrc ;;
+    *)       echo "ERROR: Unknown shell: $SHELL"; return 1 ;;
+  esac
+  echo "Reloaded $(basename "$SHELL") configuration"
+}
+
+# =============================================================================
+# CACHE CLEANING - One-liner cleanup commands
+# =============================================================================
+alias pyclean='find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null; echo "Removed __pycache__ dirs"'  # Remove __pycache__ dirs
+alias pipclean='pip cache purge'                                       # Clear pip cache
+alias brewclean='brew cleanup -s'                                      # Clear Homebrew cache
+alias clean-temp-files='rm -f *~ .*~ *.swp *.swo *.bak *.tmp *.orig *.rej'  # Remove backup and temporary files
+
+# =============================================================================
+# FILE & DIRECTORY MANIPULATION - Permissions and listing
+# =============================================================================
+alias lock='chmod -R 700'                                              # Lock files/directories (restrictive permissions 700)
+alias unlock='chmod -R 755'                                            # Unlock files/directories (standard permissions 755)
+alias mkexe='chmod -R 755'                                             # Make files executable
+alias ll='ls -lart'                                                     # List files by modification time (oldest first)
+alias la='ls -a'                                                       # List all files including hidden files
+alias l1='ls -1'                                                       # List files in single column format
+alias h='head -20'                                                     # Show first 20 lines of a file
+alias t='tail -20'                                                     # Show last 20 lines of a file
+alias m='more'                                                         # View file content page by page
+
+# =============================================================================
+# FILE & DIRECTORY OPS - Path resolution and file opening
+# =============================================================================
+alias o='fu-open'                                                        # Open files with default application
+
+# =============================================================================
+# APPLICATION SHORTCUTS - Quick launch applications - work on macs ons
+# =============================================================================
+alias code='open -a "Visual Studio Code.app"'                          # Open in VS Code (e.g. `code path/to/file`)
+alias vscode='open -a "Visual Studio Code.app"'                        # Open in VS Code
+alias cursor='cursor-ide'                                              # Open in Cursor, in IDE mode (see bin/cursor-ide)
+alias gh-desktop='open -a "GitHub Desktop.app"'                        # Open GitHub Desktop
+alias wrk='cd $WORK; pwd'
+alias wsc='create-work-shortcuts'                                     # Desktop shortcut per project in $WORK
+
+# =============================================================================
+# TOOLS - install front doors (live in tools/, not bin/)
+# =============================================================================
+env-install() {
+    local install="$BU/tools/install.sh" a
+    [ -x "$install" ] || { echo "Not found: $install" >&2; return 2; }
+    for a in "$@"; do
+        case "$a" in
+            --list|--all|--tool|--dry-run|-y|--yes|-h|--help)
+                "$install" "$@"
+                return
+                ;;
+        esac
+    done
+    if [ $# -eq 0 ]; then "$install"; return; fi
+    local args=()
+    for a in "$@"; do
+        case "$a" in
+            all) args+=(--all) ;;
+            -*) args+=("$a") ;;
+            *) args+=(--tool "$a") ;;
+        esac
+    done
+    "$install" "${args[@]}"
+}
+pydev-install() { "$BU/tools/install_pydev.sh" "$@"; }
+
+# =============================================================================
+# ENVIRONMENT - PATH and env inspection
+# =============================================================================
+alias chkpath='env-check-path'          # Check PATH entries
+alias chkenv='env-check'                # Check environment variables
+alias check-env='env-check'             # Same as env-check
+alias check-path='env-check-path'       # Same as env-check-path
+alias env-check-ld-library-path='env-check-path --var LD_LIBRARY_PATH'  # LD_LIBRARY_PATH entries + duplicates
+
+# =============================================================================
+# FILES - other names for bin/ commands
+# =============================================================================
+alias fu-unix2dos='fu-dos2unix --to-dos'                               # LF -> CRLF, in place
+
+# =============================================================================
+# GIT - other names for bin/ commands
+# =============================================================================
+alias gu-update-all='gu-update --all'                                  # Update every repo under $WORK
+
+# gu (git utils): the command half of the /gu-* skills (docs/gu.md). gu-<command> runs
+# one command; gu-<skill> runs what the skill of that name looks at first. gu-update is its own command.
+alias gu-ws='gu ws'                                                    # Status of every repo under $WORK (+ submodules)
+alias gu-ctx='gu ctx'                                                  # Everything about one repo: branch, sync, tree, PR, guides
+alias gu-prs='gu prs'                                                  # PR lists: gu-prs [mine|review|repo]
+alias gu-pr='gu pr'                                                    # One PR: CI, review, mergeability, threads
+alias gu-ci='gu ci'                                                    # Failing CI: first errors from the logs
+alias gu-threads='gu threads'                                          # Unresolved review threads of a PR
+alias gu-branches='gu branches'                                        # Branch inventory: merged, gone, unpushed, PRs
+alias gu-lock='gu lock'                                                # Lock repos against accidental changes
+alias gu-unlock='gu unlock'                                            # Undo gu-lock
+alias gu-locks='gu locks'                                              # Which repos are locked
+alias gu-readme='gu readme'                                            # README/docs check for a change
+alias gu-release='gu release'                                          # Last tag, what merged since, next version
+alias gu-auth='gu auth'                                                # Diagnose gh/git GitHub authentication
+alias gu-worktree='gu worktree'                                        # Same as wt
+alias gu-fork='gu fork'                                                # Fork and original: status|wire|pull|land|send|forks|take
+alias gu-status='gu ws'                                                # /gu-status: every repo's state
+alias gu-pr-status='gu prs mine'                                       # /gu-pr-status: your open PRs with CI and review
+alias gu-pr-review='gu prs review'                                     # /gu-pr-review: PRs waiting for your review
+alias gu-merge='gu prs repo'                                           # /gu-merge: this repo's open PRs and whether they can merge
+alias gu-actions='gu ci'                                               # /gu-actions: failing CI
+alias gu-repo='gu branches'                                            # /gu-repo: branch inventory for cleanup
+alias gu-fork-sync='gu fork status'                                    # /gu-fork-sync: what the fork and its original each lack
+alias wt='gu worktree'                                                 # Worktrees: wt list|add|move|remove|cleanup|reset (docs/worktree-flow.md)
+alias wt-list='gu worktree list --fetch --gh'                          # Every worktree, with merged / squash-merged notes
+alias wt-add='gu worktree add'                                         # wt-add <repo> <branch> [--name N] | wt-add <repo> --pr <n>
+alias wt-mv='gu worktree move'                                         # wt-mv <path> <new-name> [--branch]
+alias wt-rm='gu worktree remove --delete-branch'                       # wt-rm <path>: remove, and its branch if merged
+alias wt-cleanup='gu worktree cleanup'                                 # List worktrees safe to delete (clean + merged, stale); --apply removes
+alias wt-reset='gu worktree reset'                                     # Plan moving stray worktrees into <repo>/.claude/worktrees; --apply moves

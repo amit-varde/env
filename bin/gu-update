@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+# =============================================================================
+# File:        bin/gu-update   (gu-update-all is an alias: gu-update --all)
+# =============================================================================
+#
+# DESCRIPTION: Safely update git repos: the current one, named ones, or all
+#   Fetches the repos (in parallel), shows the plan, then updates only the
+#   repos where that is a plain fast-forward:
+#     FF       behind its upstream, no local commits -> pull --ff-only
+#              (and update moved submodules that are clean).
+#              A dirty worktree counts when every local change already matches
+#              that incoming commit: those copies are cleared, then the
+#              fast-forward updates every file. Real local edits stay put.
+#     DEFAULT  feature branch is current, local default branch is behind
+#              -> fast-forward the default branch without checking it out
+#   Everything else (real local edits and behind, diverged, detached, upstream
+#   gone, fetch failed, rebase in progress, locked) is listed and left alone.
+#   Use the /gu-update Claude Code skill to walk through those one by one.
+#   Never forces, resets, discards real local edits, stashes or pushes.
+#
+#   The work is done by `gu ws --plan` and `gu update` (the same
+#   code the /gu-update skill uses).
+#
+# ARGUMENTS:
+#   repo...       Repos to update: folder names under $WORK, or paths.
+#                 Default: the repo you are in (gu-update-all: every repo).
+#
+# OPTIONS:
+#   -a, --all     Every git repo directly under $WORK (what gu-update-all does)
+#   -n, --dry-run Fetch and show the plan; change nothing
+#   -y, --yes     Don't ask before updating
+#   -h, --help    Show this help
+#
+# ENVIRONMENT VARIABLES:
+#   WORK          Folder holding the repos (default: ~/work)
+#
+# EXIT CODES:
+#   0 - Every repo is current or was updated
+#   1 - Bad arguments, no repo here, or no repos found
+#   2 - Some repos need attention (left alone, refused or conflicted)
+#
+#   GU_STATUS=1 also prints git status for each repo before it exits.
+#
+# USAGE:
+#   gu-update                      # the repo you are in
+#   gu-update rock pyxis           # these two
+#   gu-update-all                  # every repo under $WORK (= gu-update --all)
+#   gu-update-all -n               # plan only
+#   gu-update -y --all             # every repo, without asking
+#
+# =============================================================================
+set -uo pipefail
+
+: "${BU:=$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/.." && pwd)}"
+source "$BU/lib/common.bash"
+handle_help "$@"
+
+GU="$BU/bin/gu"
+all=0 dry_run=0 yes=0 repos=() status_repos=() plan=""
+
+add_status_repo() {
+    local top="$1" have
+    [[ -n "$top" ]] || return 0
+    for have in ${status_repos[@]+"${status_repos[@]}"}; do
+        [[ "$have" == "$top" ]] && return 0
+    done
+    status_repos+=("$top")
+}
+quiet_repo() { # $1 name or path -> toplevel, or fail
+    local r="$1" work="${WORK:-$HOME/work}" top
+    if [[ -d "$r" ]]; then
+        top=$(git -C "$r" rev-parse --show-toplevel 2>/dev/null) || return 1
+    elif [[ -d "$work/$r" ]]; then
+        top=$(git -C "$work/$r" rev-parse --show-toplevel 2>/dev/null) || return 1
+    else
+        return 1
+    fi
+    printf '%s\n' "$top"
+}
+gu_update_status() {
+    local rc=$? top
+    trap - EXIT
+    [[ "${GU_STATUS:-}" == 1 ]] || exit "$rc"
+    for top in ${status_repos[@]+"${status_repos[@]}"}; do
+        echo
+        echo "== git status: $(basename "$top") =="
+        git -C "$top" status || true
+    done
+    exit "$rc"
+}
+trap gu_update_status EXIT
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -a|--all)     all=1 ;;
+        -n|--dry-run) dry_run=1 ;;
+        -y|--yes)     yes=1 ;;
+        -*)           err "unknown option: $1 (see -h)"; exit 1 ;;
+        *)            repos+=("$1") ;;
+    esac
+    shift
+done
+
+work="${WORK:-$HOME/work}"
+if [[ $all -eq 1 ]]; then
+    [[ ${#repos[@]} -gt 0 ]] && { err "--all takes no repo names"; exit 1; }
+    info "Fetching repos under $work ..."
+elif [[ ${#repos[@]} -eq 0 ]]; then
+    top=$(git rev-parse --show-toplevel 2>/dev/null) \
+        || { err "not in a git repo: name repos, or use --all / gu-update-all"; exit 1; }
+    repos=("$top")
+    info "Fetching $top ..."
+else
+    info "Fetching ${repos[*]} ..."
+fi
+if [[ $all -eq 0 ]]; then
+    for r in ${repos[@]+"${repos[@]}"}; do
+        top=$(quiet_repo "$r") || continue
+        add_status_repo "$top"
+    done
+fi
+plan=$("$GU" ws --fetch --plan ${repos[@]+"${repos[@]}"}) || exit 1
+
+# The plan names repos by folder name; map a name back to what was asked for,
+# so repos outside $WORK (given as paths) still resolve. Bash 3.2: no assoc arrays.
+target_for() {
+    local r
+    for r in ${repos[@]+"${repos[@]}"}; do
+        [[ "$(basename "$r")" == "$1" ]] && { echo "$r"; return; }
+    done
+    echo "$1"
+}
+
+while IFS='|' read -r name _; do
+    case "$name" in repo|" "*|"") continue ;; esac
+    top=$(quiet_repo "$(target_for "$name")") || continue
+    add_status_repo "$top"
+done <<< "$plan"
+
+echo
+# "-" for empty cells: BSD column merges empty fields and shifts the row
+printf '%s\n' "$plan" | cut -d'|' -f1-4,7,12,13 \
+    | awk -F'|' -v OFS='|' '{ for (i = 1; i <= NF; i++) if ($i == "") $i = "-"; print }' \
+    | column -t -s'|'
+echo
+
+# Top-level rows only (submodule rows are indented)
+todo=() attention=()
+while IFS='|' read -r name branch _ ba _ _ dirty _ _ op _ notes bucket; do
+    case "$name" in repo|" "*|"") continue ;; esac
+    why="$branch, behind/ahead $ba"
+    [[ "$dirty" != 0 ]] && why="$why, $dirty dirty"
+    [[ "$op" != - ]] && why="$why, $op in progress"
+    case "$bucket" in
+        FF|DEFAULT) todo+=("$bucket|$name") ;;
+        CURRENT)    ;;
+        *)          attention+=("$name ($bucket: $why${notes:+; $notes})") ;;
+    esac
+done <<< "$plan"
+
+if [[ ${#todo[@]} -eq 0 ]]; then
+    info "Nothing to fast-forward."
+else
+    info "To update: $(printf '%s\n' "${todo[@]}" | sed 's/^\(.*\)|\(.*\)$/\2 (\1)/' | paste -sd, - | sed 's/,/, /g')"
+    if [[ $dry_run -eq 1 ]]; then
+        info "Dry run: nothing changed."
+    else
+        if [[ $yes -eq 0 ]]; then
+            if [[ ! -t 0 ]]; then err "not a terminal; pass -y to update without asking"; exit 1; fi
+            read -r -p "Update these ${#todo[@]} repo(s)? [y/N] " ans
+            [[ "$ans" == [yY]* ]] || { info "Nothing changed."; exit 0; }
+        fi
+        for item in "${todo[@]}"; do
+            action=$(tr '[:upper:]' '[:lower:]' <<< "${item%%|*}") name="${item#*|}"
+            out=$("$GU" update "$action" "$(target_for "$name")" 2>&1); rc=$?
+            if [[ $rc -eq 0 ]]; then
+                success "$out"
+                grep -q '^SUBMODULE_NEEDS_DECISION' <<< "$out" && attention+=("$name (submodule left as is)")
+            else
+                echo "$name: $out" >&2
+                attention+=("$name (update stopped, exit $rc)")
+            fi
+        done
+    fi
+fi
+
+if [[ ${#attention[@]} -gt 0 ]]; then
+    echo
+    info_bold "Left alone - handle by hand or with /gu-update in Claude Code:"
+    printf '  %s\n' "${attention[@]}"
+    exit 2
+fi
+exit 0
